@@ -1,11 +1,11 @@
-using Authenticator.Data;
-using Authenticator.Data.Models;
-using Authenticator.Logging;
-using Microsoft.EntityFrameworkCore;
 using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
+using Authenticator.Data;
+using Authenticator.Data.Models;
+using Authenticator.Logging;
+using Microsoft.EntityFrameworkCore;
 
 namespace Authenticator.Services;
 
@@ -75,7 +75,6 @@ public class DatabaseService
         LoggingConfiguration.LogDebug($"Account id {account.Id} updated.", nameof(DatabaseService));
     }
 
-<<<<<<< HEAD
     public async Task MoveAccountToFolderAsync(int accountId, int? folderId)
     {
         LoggingConfiguration.LogInfo($"Moving account id {accountId} to folder {(folderId.HasValue ? folderId.Value.ToString() : "None")}.", nameof(DatabaseService));
@@ -103,8 +102,6 @@ public class DatabaseService
         LoggingConfiguration.LogInfo($"Account id {accountId} moved to folder {(folderId.HasValue ? folderId.Value.ToString() : "None")}.", nameof(DatabaseService));
     }
 
-=======
->>>>>>> a7b6a5e5758ce5dab7ed62ef23014fd0e6a388a1
     public async Task DeleteAccountAsync(int id, bool softDelete = true)
     {
         LoggingConfiguration.LogInfo($"Deleting account id {id}. SoftDelete={softDelete}.", nameof(DatabaseService));

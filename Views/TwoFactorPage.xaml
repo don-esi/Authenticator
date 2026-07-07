@@ -109,20 +109,15 @@
 							Padding="12,6"
 							HorizontalAlignment="Right"
 							Click="CreateFolderButton_Click"
-<<<<<<< HEAD
 							FontSize="12"
 							Style="{StaticResource SecondaryButtonStyle}"
 							ToolTipService.ToolTip="Create folder">
-                            <FontIcon FontFamily="Segoe Fluent Icons" Glyph="&#xE8F4;" FontSize="18" />
+							<FontIcon
+								FontFamily="Segoe Fluent Icons"
+								FontSize="18"
+								Glyph="&#xE8F4;" />
 						</Button>
-
-                    </Grid>
-=======
-							Content="+ New Folder"
-							FontSize="12"
-							Style="{StaticResource SecondaryButtonStyle}" />
 					</Grid>
->>>>>>> a7b6a5e5758ce5dab7ed62ef23014fd0e6a388a1
 
 					<TextBlock
 						Foreground="{StaticResource SecondaryTextBrush}"

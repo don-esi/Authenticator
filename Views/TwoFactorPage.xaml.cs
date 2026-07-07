@@ -147,11 +147,8 @@ public sealed partial class TwoFactorPage : Page
 
     private sealed record FolderColorOption(string Name, string HexColor);
 
-<<<<<<< HEAD
     private sealed record AccountFolderOption(int? FolderId, string Name);
 
-=======
->>>>>>> a7b6a5e5758ce5dab7ed62ef23014fd0e6a388a1
     protected async override void OnNavigatedTo(NavigationEventArgs e)
     {
         base.OnNavigatedTo(e);
@@ -296,7 +293,6 @@ public sealed partial class TwoFactorPage : Page
         LoggingConfiguration.LogDebug($"Copied TOTP code from AccountCard for account id {e.Account.Id}.", nameof(TwoFactorPage));
     }
 
-<<<<<<< HEAD
     private async Task ShowMoveToFolderDialogAsync(Account account)
     {
         ArgumentNullException.ThrowIfNull(account);
@@ -393,11 +389,5 @@ public sealed partial class TwoFactorPage : Page
             LoggingConfiguration.LogInfo($"Navigating to BackupPage for account id {e.Account.Id} from TwoFactorPage.", nameof(TwoFactorPage));
             Frame.Navigate(typeof(BackupPage), e.Account.Id);
         }
-=======
-    private void AccountCard_MoreRequested(object sender, AccountCardActionEventArgs e)
-    {
-        LoggingConfiguration.LogInfo($"Navigating to BackupPage for account id {e.Account.Id} from TwoFactorPage.", nameof(TwoFactorPage));
-        Frame.Navigate(typeof(BackupPage), e.Account.Id);
->>>>>>> a7b6a5e5758ce5dab7ed62ef23014fd0e6a388a1
     }
 }

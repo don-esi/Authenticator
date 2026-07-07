@@ -9,13 +9,7 @@
 	Title="Authenticator"
 	mc:Ignorable="d">
 
-<<<<<<< HEAD
-	<Grid
-		Background="{StaticResource PageBackgroundBrush}"
-		RequestedTheme="Light">
-=======
-	<Grid Background="{StaticResource PageBackgroundBrush}">
->>>>>>> a7b6a5e5758ce5dab7ed62ef23014fd0e6a388a1
+	<Grid Background="{StaticResource PageBackgroundBrush}" RequestedTheme="Light">
 		<Grid.Resources>
 			<ResourceDictionary>
 				<ResourceDictionary.MergedDictionaries>
@@ -25,7 +19,6 @@
 			</ResourceDictionary>
 		</Grid.Resources>
 
-<<<<<<< HEAD
 		<Grid>
 			<Grid.RowDefinitions>
 				<RowDefinition Height="Auto" />
@@ -33,9 +26,6 @@
 				<RowDefinition Height="Auto" />
 			</Grid.RowDefinitions>
 
-=======
-		<Grid RowDefinitions="Auto,*,Auto">
->>>>>>> a7b6a5e5758ce5dab7ed62ef23014fd0e6a388a1
 			<Grid
 				Grid.Row="0"
 				Padding="16,8"
@@ -46,70 +36,43 @@
 					Text="2FA Codes" />
 			</Grid>
 
-<<<<<<< HEAD
 			<Grid Grid.Row="1">
-			<Frame
-				x:Name="SimpleContentFrame"
-				Grid.Row="1"
-				Margin="0" />
-=======
-			<Grid Grid.Row="1" RowDefinitions="Auto,*">
 				<Frame
 					x:Name="SimpleContentFrame"
 					Grid.Row="1"
 					Margin="0" />
->>>>>>> a7b6a5e5758ce5dab7ed62ef23014fd0e6a388a1
 			</Grid>
 
 			<NavigationView
 				x:Name="NavView"
 				Grid.Row="2"
 				Background="{StaticResource PageBackgroundBrush}"
-<<<<<<< HEAD
 				Foreground="{StaticResource PrimaryTextBrush}"
 				IsBackButtonVisible="Collapsed"
 				IsSettingsVisible="True"
 				PaneDisplayMode="Top"
 				SelectionChanged="NavView_SelectionChanged">
-                    <NavigationView.MenuItems>
-                        <!-- 2FA -->
-                        <NavigationViewItem Content="" Tag="TwoFactor">
-                            <NavigationViewItem.Icon>
-                            <FontIcon FontFamily="Segoe Fluent Icons" Glyph="&#xE192;" FontSize="24" />
-                            </NavigationViewItem.Icon>
-                        </NavigationViewItem>
-                        <!-- Backup -->
-                    <NavigationViewItem Content="" Tag="Backup">
-                        <NavigationViewItem.Icon>
-                            <FontIcon FontFamily="Segoe Fluent Icons" Glyph="&#xE777;" FontSize="24" />
-                            </NavigationViewItem.Icon>
-                        </NavigationViewItem>
-                    </NavigationView.MenuItems>
-            </NavigationView>
-=======
-				IsBackButtonVisible="Collapsed"
-				IsSettingsVisible="False"
-				PaneDisplayMode="Top"
-				SelectionChanged="NavView_SelectionChanged">
 				<NavigationView.MenuItems>
-					<NavigationViewItem Content="2FA" Tag="TwoFactor" HorizontalAlignment="Left">
+					<!--  2FA  -->
+					<NavigationViewItem Content="" Tag="TwoFactor">
 						<NavigationViewItem.Icon>
-							<FontIcon Glyph="&#xE192;" />
+							<FontIcon
+								FontFamily="Segoe Fluent Icons"
+								FontSize="24"
+								Glyph="&#xE192;" />
 						</NavigationViewItem.Icon>
 					</NavigationViewItem>
-					<NavigationViewItem Content="Backup" Tag="Backup" HorizontalAlignment="Center">
+					<!--  Backup  -->
+					<NavigationViewItem Content="" Tag="Backup">
 						<NavigationViewItem.Icon>
-							<FontIcon Glyph="&#xE777;" />
-						</NavigationViewItem.Icon>
-					</NavigationViewItem>
-					<NavigationViewItem Content="Settings" Tag="Settings" HorizontalAlignment="Right">
-						<NavigationViewItem.Icon>
-							<FontIcon Glyph="&#xE713;" />
+							<FontIcon
+								FontFamily="Segoe Fluent Icons"
+								FontSize="24"
+								Glyph="&#xE777;" />
 						</NavigationViewItem.Icon>
 					</NavigationViewItem>
 				</NavigationView.MenuItems>
 			</NavigationView>
->>>>>>> a7b6a5e5758ce5dab7ed62ef23014fd0e6a388a1
 		</Grid>
 	</Grid>
 </Window>
