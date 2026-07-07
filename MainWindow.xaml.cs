@@ -2,20 +2,28 @@ using System;
 using System.Collections.Generic;
 using Authenticator.Logging;
 using Authenticator.Views;
+<<<<<<< HEAD
 using Microsoft.UI;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using WinRT.Interop;
+=======
+using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Controls;
+>>>>>>> a7b6a5e5758ce5dab7ed62ef23014fd0e6a388a1
 
 namespace Authenticator;
 
 public sealed partial class MainWindow : Window
 {
+<<<<<<< HEAD
     private const int DefaultWindowWidth = 778;
     private const int DefaultWindowHeight = 1490;
     private const double NavigationItemHeight = 60;
 
+=======
+>>>>>>> a7b6a5e5758ce5dab7ed62ef23014fd0e6a388a1
     private readonly Dictionary<string, ShellSection> _shellSections = new(StringComparer.Ordinal)
     {
         ["TwoFactor"] = new(typeof(TwoFactorPage), "2FA", "Manage and organize your authenticator accounts."),
@@ -29,15 +37,20 @@ public sealed partial class MainWindow : Window
 
         InitializeComponent();
 
+<<<<<<< HEAD
         NavView.Loaded += NavView_Loaded;
         NavView.SizeChanged += NavView_SizeChanged;
 
         ResizeToDisplayIfNeeded();
+=======
+        AppWindow.Resize(new Windows.Graphics.SizeInt32(778, 1490));
+>>>>>>> a7b6a5e5758ce5dab7ed62ef23014fd0e6a388a1
         NavigateToSection("TwoFactor", updateSelection: true);
 
         LoggingConfiguration.LogInfo("MainWindow initialization completed.", nameof(MainWindow));
     }
 
+<<<<<<< HEAD
     private void ResizeToDisplayIfNeeded()
     {
         try
@@ -107,6 +120,8 @@ public sealed partial class MainWindow : Window
         }
     }
 
+=======
+>>>>>>> a7b6a5e5758ce5dab7ed62ef23014fd0e6a388a1
     private void NavView_SelectionChanged(NavigationView sender, NavigationViewSelectionChangedEventArgs args)
     {
         if (args.SelectedItemContainer?.Tag is not string tag)
