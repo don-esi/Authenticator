@@ -1,0 +1,55 @@
+<UserControl
+	x:Class="Authenticator.Controls.FolderChip"
+	xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+	xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+	xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+	xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+	xmlns:converters="using:Authenticator.Converters"
+	mc:Ignorable="d">
+
+	<UserControl.Resources>
+		<ResourceDictionary>
+			<ResourceDictionary.MergedDictionaries>
+				<ResourceDictionary Source="/Styles/Colors.xaml"/>
+			</ResourceDictionary.MergedDictionaries>
+			<converters:StringToColorConverter x:Key="StringToColorConverter"/>
+			<converters:CountToVisibilityConverter x:Key="CountToVisibilityConverter"/>
+		</ResourceDictionary>
+	</UserControl.Resources>
+
+	<Button x:Name="ChipButton"
+			Click="ChipButton_Click"
+			Padding="16,8"
+			Margin="0,0,8,8"
+			CornerRadius="20"
+			BorderThickness="0">
+		<Button.Background>
+			<SolidColorBrush Color="{x:Bind FolderData.Color, Mode=OneWay, Converter={StaticResource StringToColorConverter}}"/>
+		</Button.Background>
+
+		<StackPanel Orientation="Horizontal" Spacing="8">
+			<!-- Folder Icon -->
+			<FontIcon Glyph="&#xE8B7;" 
+					  FontSize="16"
+					  Foreground="{StaticResource PrimaryTextBrush}"/>
+
+			<!-- Folder Name -->
+			<TextBlock Text="{x:Bind FolderData.Name, Mode=OneWay}"
+					   FontSize="14"
+					   FontWeight="SemiBold"
+					   Foreground="{StaticResource PrimaryTextBrush}"
+					   VerticalAlignment="Center"/>
+
+			<!-- Account Count Badge -->
+			<Border Background="{StaticResource CardBackgroundBrush}"
+					CornerRadius="10"
+					Padding="8,2"
+					Visibility="{x:Bind FolderData.Accounts.Count, Mode=OneWay, Converter={StaticResource CountToVisibilityConverter}}">
+				<TextBlock Text="{x:Bind FolderData.Accounts.Count, Mode=OneWay}"
+						   FontSize="12"
+						   FontWeight="SemiBold"
+						   Foreground="{StaticResource SecondaryTextBrush}"/>
+			</Border>
+		</StackPanel>
+	</Button>
+</UserControl>
