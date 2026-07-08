@@ -7,7 +7,7 @@
 
 	<!--  Background Colors  -->
 	<Color x:Key="PageBackgroundColor">#F8F9FA</Color>
-	<Color x:Key="CardBackgroundColor">#FFFFFF</Color>
+	<Color x:Key="CardBackgroundColor">#F4F6FC</Color>
 	<Color x:Key="SecondaryBackgroundColor">#F3F4F6</Color>
 
 	<!--  Text Colors  -->

@@ -60,13 +60,14 @@ public class TotpService
     }
 
     /// <summary>
-    /// Gets the progress (0.0 to 1.0) through the current time period.
+    /// Gets the progress (1.0 to 0.0) countdown until the next code regeneration.
+    /// Returns 1.0 when code is fresh, decreases to 0.0 when code expires.
     /// </summary>
     public double GetProgress(Account account)
     {
         ArgumentNullException.ThrowIfNull(account);
         var secondsRemaining = GetSecondsRemaining(account);
-        return 1.0 - ((double)secondsRemaining / account.Period);
+        return (double)secondsRemaining / account.Period;
     }
 
     /// <summary>

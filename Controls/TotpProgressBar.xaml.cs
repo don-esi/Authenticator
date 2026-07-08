@@ -1,6 +1,3 @@
-using Microsoft.UI.Xaml;
-using Microsoft.UI.Xaml.Controls;
-
 namespace Authenticator.Controls;
 
 public sealed partial class TotpProgressBar : UserControl
@@ -21,7 +18,7 @@ public sealed partial class TotpProgressBar : UserControl
 
     public TotpProgressBar()
     {
-        this.InitializeComponent();
+        InitializeComponent();
     }
 
     public double Progress

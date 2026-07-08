@@ -75,9 +75,9 @@ public partial class TwoFactorViewModel : ObservableObject
         _totpService = totpService;
         _dispatcherQueue = dispatcherQueue;
 
-        // Create timer for live TOTP updates (1 second interval)
+        // Create timer for live TOTP updates (smooth countdown display every 500ms)
         _updateTimer = _dispatcherQueue.CreateTimer();
-        _updateTimer.Interval = TimeSpan.FromSeconds(1);
+        _updateTimer.Interval = TimeSpan.FromMilliseconds(500);
         _updateTimer.Tick += UpdateTimer_Tick;
 
         LoggingConfiguration.LogInfo("TwoFactorViewModel initialized.", nameof(TwoFactorViewModel));
@@ -250,7 +250,16 @@ public partial class TwoFactorViewModel : ObservableObject
     }
 
     [RelayCommand]
-    private async Task CreateFolderAsync()
+    private void SetSortOption(string? option)
+    {
+        if (!string.IsNullOrWhiteSpace(option))
+        {
+            SortOption = option;
+        }
+    }
+
+    [RelayCommand]
+    private static async Task CreateFolderAsync()
     {
         // Navigate to Create Folder page
         await Task.CompletedTask;

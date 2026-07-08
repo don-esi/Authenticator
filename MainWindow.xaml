@@ -3,6 +3,7 @@
 	x:Class="Authenticator.MainWindow"
 	xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
 	xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+	xmlns:controls="using:Authenticator.Controls"
 	xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
 	xmlns:local="using:Authenticator"
 	xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
@@ -56,19 +57,13 @@
 					<!--  2FA  -->
 					<NavigationViewItem Content="" Tag="TwoFactor">
 						<NavigationViewItem.Icon>
-							<FontIcon
-								FontFamily="Segoe Fluent Icons"
-								FontSize="24"
-								Glyph="&#xE192;" />
+							<controls:FluentIcon Favorite="Permissions" />
 						</NavigationViewItem.Icon>
 					</NavigationViewItem>
 					<!--  Backup  -->
 					<NavigationViewItem Content="" Tag="Backup">
 						<NavigationViewItem.Icon>
-							<FontIcon
-								FontFamily="Segoe Fluent Icons"
-								FontSize="24"
-								Glyph="&#xE777;" />
+							<controls:FluentIcon Favorite="Refresh" />
 						</NavigationViewItem.Icon>
 					</NavigationViewItem>
 				</NavigationView.MenuItems>

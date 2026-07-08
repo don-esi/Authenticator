@@ -43,10 +43,7 @@
 						Style="{StaticResource SearchBoxStyle}"
 						Text="{x:Bind ViewModel.SearchText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}">
 						<TextBox.Resources>
-							<FontIcon
-								x:Key="SearchIcon"
-								FontSize="16"
-								Glyph="&#xE721;" />
+							<controls:FluentIcon Favorite="Search" FontSize="16" x:Key="SearchIcon" />
 						</TextBox.Resources>
 					</TextBox>
 
@@ -57,23 +54,46 @@
 						Command="{x:Bind ViewModel.ToggleViewModeCommand}"
 						Style="{StaticResource IconButtonStyle}"
 						ToolTipService.ToolTip="Toggle view">
-						<FontIcon FontSize="16" Glyph="{x:Bind ViewModel.IsGridView, Mode=OneWay, Converter={StaticResource ViewModeIconConverter}}" />
+						<controls:FluentIcon FontSize="16" Symbol="{x:Bind ViewModel.IsGridView, Mode=OneWay, Converter={StaticResource ViewModeIconConverter}}" />
 					</Button>
 
 					<!--  Sort Dropdown  -->
-					<ComboBox
+					<DropDownButton
 						Grid.Column="2"
-						Width="160"
-						Height="40"
-						SelectedValue="{x:Bind ViewModel.SortOption, Mode=TwoWay}"
-						SelectedValuePath="Content">
-						<ComboBoxItem Content="Latest First" />
-						<ComboBoxItem Content="Earliest First" />
-						<ComboBoxItem Content="Service A→Z" />
-						<ComboBoxItem Content="Service Z→A" />
-						<ComboBoxItem Content="Account A→Z" />
-						<ComboBoxItem Content="Account Z→A" />
-					</ComboBox>
+						AutomationProperties.Name="Sort"
+						ToolTipService.ToolTip="Sort">
+						<DropDownButton.Content>
+							<controls:FluentIcon Favorite="Sort" />
+						</DropDownButton.Content>
+						<DropDownButton.Flyout>
+							<MenuFlyout Placement="BottomEdgeAlignedLeft">
+								<MenuFlyoutItem
+									Command="{x:Bind ViewModel.SetSortOptionCommand}"
+									CommandParameter="Latest First"
+									Text="Latest First" />
+								<MenuFlyoutItem
+									Command="{x:Bind ViewModel.SetSortOptionCommand}"
+									CommandParameter="Earliest First"
+									Text="Earliest First" />
+								<MenuFlyoutItem
+									Command="{x:Bind ViewModel.SetSortOptionCommand}"
+									CommandParameter="Service A→Z"
+									Text="Service A→Z" />
+								<MenuFlyoutItem
+									Command="{x:Bind ViewModel.SetSortOptionCommand}"
+									CommandParameter="Service Z→A"
+									Text="Service Z→A" />
+								<MenuFlyoutItem
+									Command="{x:Bind ViewModel.SetSortOptionCommand}"
+									CommandParameter="Account A→Z"
+									Text="Account A→Z" />
+								<MenuFlyoutItem
+									Command="{x:Bind ViewModel.SetSortOptionCommand}"
+									CommandParameter="Account Z→A"
+									Text="Account Z→A" />
+							</MenuFlyout>
+						</DropDownButton.Flyout>
+					</DropDownButton>
 				</Grid>
 
 				<!--  Folders Section  -->
@@ -137,7 +157,8 @@
 								CornerRadius="20">
 								<Button.Content>
 									<StackPanel Orientation="Horizontal" Spacing="8">
-										<FontIcon FontSize="16" Glyph="&#xE80F;" />
+										<controls:FluentIcon Favorite="Home" FontSize="16" />
+										<!--<FontIcon FontSize="16" Glyph="&#xE80F;" />-->
 										<TextBlock
 											FontSize="14"
 											FontWeight="SemiBold"
@@ -254,7 +275,7 @@
 			VerticalAlignment="Bottom"
 			Click="AddAccountButton_Click"
 			Style="{StaticResource FabButtonStyle}">
-			<FontIcon FontSize="24" Glyph="&#xE710;" />
+			<controls:FluentIcon FontSize="24" Symbol="Add" />
 		</Button>
 	</Grid>
 </Page>
