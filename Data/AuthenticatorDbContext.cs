@@ -1,5 +1,3 @@
-using System;
-using System.IO;
 using Authenticator.Data.Models;
 using Authenticator.Logging;
 using Microsoft.EntityFrameworkCore;
@@ -17,13 +15,19 @@ public partial class AuthenticatorDbContext : DbContext
     public DbSet<PasswordEntry> PasswordEntries { get; set; } = null!;
     public DbSet<AppSettings> AppSettings { get; set; } = null!;
 
+    /// <summary>
+    /// Existing Authenticator database on .\ZOGEXPRESS2025.
+    /// Startup must not create, migrate, or alter tables.
+    /// </summary>
+    public const string ConnectionString =
+        "Server=.\\ZOGEXPRESS2025;Database=Authenticator;Trusted_Connection=True;TrustServerCertificate=True";
+
     protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
     {
         if (!optionsBuilder.IsConfigured)
         {
-            var dbPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Authenticator.db");
-            optionsBuilder.UseSqlite($"Data Source={dbPath}");
-            LoggingConfiguration.LogDebug($"DbContext configured with SQLite path: {dbPath}.", nameof(AuthenticatorDbContext));
+            optionsBuilder.UseSqlServer(ConnectionString);
+            LoggingConfiguration.LogDebug("DbContext configured for SQL Server .\\ZOGEXPRESS2025, database Authenticator.", nameof(AuthenticatorDbContext));
         }
         else
         {
