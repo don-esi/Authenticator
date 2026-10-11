@@ -83,7 +83,7 @@
 				Margin="12,0"
 				VerticalAlignment="Center"
 				Orientation="Horizontal">
-				<FluidIcon
+				<controls:FluentIcon
 					Favorite="Refresh"
 					FontSize="16"
 					Foreground="{StaticResource SecondaryTextBrush}" />
@@ -104,13 +104,13 @@
 					Click="CopyButton_Click"
 					Style="{StaticResource IconButtonStyle}"
 					ToolTipService.ToolTip="Copy code">
-					<FluentIcon Favorite="Copy" FontSize="16" />
+					<controls:FluentIcon Favorite="Copy" FontSize="16" />
 				</Button>
 				<Button
 					Click="MoreButton_Click"
 					Style="{StaticResource IconButtonStyle}"
 					ToolTipService.ToolTip="More options">
-					<FluentIcon Favorite="More" FontSize="16" />
+					<controls:FluentIcon Favorite="More" FontSize="16" />
 				</Button>
 			</StackPanel>
 		</Grid>
