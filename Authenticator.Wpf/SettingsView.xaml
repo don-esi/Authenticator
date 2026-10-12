@@ -1,0 +1,47 @@
+<UserControl x:Class="Authenticator.SettingsView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             Background="Transparent">
+    <ScrollViewer VerticalScrollBarVisibility="Auto">
+        <StackPanel Margin="20,16,20,16">
+            <TextBlock Text="Settings"
+                       FontSize="28"
+                       FontWeight="SemiBold"
+                       HorizontalAlignment="Center"
+                       Margin="0,8,0,16" />
+
+            <Border Background="#F4F6FC" CornerRadius="16" Padding="16" Margin="0,0,0,12">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <StackPanel>
+                        <TextBlock Text="Accounts" Foreground="#6B7280" HorizontalAlignment="Center" />
+                        <TextBlock x:Name="AccountCountText" Text="0" FontSize="28" FontWeight="SemiBold" HorizontalAlignment="Center" />
+                    </StackPanel>
+                    <StackPanel Grid.Column="1">
+                        <TextBlock Text="Folders" Foreground="#6B7280" HorizontalAlignment="Center" />
+                        <TextBlock x:Name="FolderCountText" Text="0" FontSize="28" FontWeight="SemiBold" HorizontalAlignment="Center" />
+                    </StackPanel>
+                </Grid>
+            </Border>
+
+            <TextBlock Text="AUTO LOCK" Foreground="#6B7280" FontSize="12" Margin="4,8,0,8" />
+            <Border Background="#F4F6FC" CornerRadius="16" Padding="8" Margin="0,0,0,12">
+                <StackPanel x:Name="AutoLockPanel" />
+            </Border>
+
+            <TextBlock Text="EXPORT AND IMPORT" Foreground="#6B7280" FontSize="12" Margin="4,8,0,8" />
+            <Border Background="#F4F6FC" CornerRadius="16" Padding="16">
+                <StackPanel>
+                    <TextBlock TextWrapping="Wrap" Foreground="#6B7280" Margin="0,0,0,12"
+                               Text="Export writes a JSON file that contains secret keys. Import adds accounts from a file this app exported." />
+                    <Button Content="Export accounts" Margin="0,0,0,8" Click="Export_Click" Style="{StaticResource PrimaryButton}" />
+                    <Button Content="Import accounts" Click="Import_Click" Style="{StaticResource SecondaryButton}" />
+                    <TextBlock x:Name="TransferStatus" Margin="0,12,0,0" TextWrapping="Wrap" Foreground="#1F2937" />
+                </StackPanel>
+            </Border>
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

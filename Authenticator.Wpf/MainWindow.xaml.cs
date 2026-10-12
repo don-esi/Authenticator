@@ -1,9 +1,7 @@
-using System.Collections.ObjectModel;
-using System.ComponentModel;
-using System.Runtime.CompilerServices;
 using System.Windows;
+using System.Windows.Input;
+using System.Windows.Media;
 using System.Windows.Threading;
-using Authenticator.Data.Models;
 using Authenticator.Logging;
 using Authenticator.Services;
 
@@ -11,181 +9,109 @@ namespace Authenticator;
 
 public partial class MainWindow : Window
 {
-    private readonly DatabaseService _database = new();
-    private readonly TotpService _totp = new();
-    private readonly ObservableCollection<AccountRow> _rows = new();
-    private readonly DispatcherTimer _timer;
+    private readonly SettingsService _settings = new();
+    private readonly DispatcherTimer _lockTimer;
+    private DateTime _lastActivityUtc = DateTime.UtcNow;
+    private int _timeoutSeconds;
+    private bool _locked;
 
     public MainWindow()
     {
         InitializeComponent();
-        AccountList.ItemsSource = _rows;
-        _timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
-        _timer.Tick += (_, _) => RefreshCodes();
+        SettingsPage.AutoLockChanged += (_, seconds) =>
+        {
+            _timeoutSeconds = seconds;
+            _lastActivityUtc = DateTime.UtcNow;
+        };
+        SettingsPage.DataChanged += async (_, _) => await CodesPage.ReloadAsync();
+        _lockTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
+        _lockTimer.Tick += (_, _) => CheckAutoLock();
     }
 
     private async void Window_Loaded(object sender, RoutedEventArgs e)
     {
         try
         {
-            await LoadAccountsAsync();
-            RefreshCodes();
-            _timer.Start();
+            var settings = await _settings.GetSettingsAsync();
+            _timeoutSeconds = settings.AutoLockTimeout;
         }
         catch (Exception ex)
         {
-            LoggingConfiguration.LogException(ex, "Failed to load accounts.", nameof(MainWindow));
-            MessageBox.Show(this, ex.Message, "Authenticator", MessageBoxButton.OK, MessageBoxImage.Error);
+            LoggingConfiguration.LogException(ex, "Failed to load auto-lock settings.", nameof(MainWindow));
         }
+
+        _lastActivityUtc = DateTime.UtcNow;
+        _lockTimer.Start();
+        ShowPage(CodesPage);
     }
 
     private void Window_Closed(object? sender, EventArgs e)
     {
-        _timer.Stop();
+        _lockTimer.Stop();
     }
 
-    private async void AddButton_Click(object sender, RoutedEventArgs e)
+    private void Window_PreviewActivity(object sender, InputEventArgs e)
     {
-        LoggingConfiguration.LogInfo("Add account dialog requested.", nameof(MainWindow));
-        var dialog = new AddAccountWindow { Owner = this };
-        var result = dialog.ShowDialog();
-        LoggingConfiguration.LogInfo($"Add account dialog closed. Result={result}.", nameof(MainWindow));
-        if (result != true || dialog.AccountToSave is null)
+        if (!_locked)
+            _lastActivityUtc = DateTime.UtcNow;
+    }
+
+    private void CheckAutoLock()
+    {
+        if (_locked || _timeoutSeconds <= 0)
             return;
 
-        try
-        {
-            await _database.AddAccountAsync(dialog.AccountToSave);
-            await LoadAccountsAsync();
-            StatusText.Text = $"Added {dialog.AccountToSave.ServiceName}.";
-        }
-        catch (Exception ex)
-        {
-            LoggingConfiguration.LogException(ex, "Failed to add account.", nameof(MainWindow));
-            MessageBox.Show(this, ex.Message, "Add account", MessageBoxButton.OK, MessageBoxImage.Error);
-        }
+        if (DateTime.UtcNow - _lastActivityUtc >= TimeSpan.FromSeconds(_timeoutSeconds))
+            Lock();
     }
 
-    private async void DeleteButton_Click(object sender, RoutedEventArgs e)
+    private void Lock()
     {
-        if (AccountList.SelectedItem is not AccountRow row)
-        {
-            StatusText.Text = "Select an account to delete.";
-            return;
-        }
-
-        var confirm = MessageBox.Show(
-            this,
-            $"Delete {row.ServiceName} ({row.Username})?",
-            "Delete account",
-            MessageBoxButton.YesNo,
-            MessageBoxImage.Question);
-        if (confirm != MessageBoxResult.Yes)
-            return;
-
-        try
-        {
-            await _database.DeleteAccountAsync(row.Id);
-            await LoadAccountsAsync();
-            StatusText.Text = $"Deleted {row.ServiceName}.";
-        }
-        catch (Exception ex)
-        {
-            LoggingConfiguration.LogException(ex, $"Failed to delete account id {row.Id}.", nameof(MainWindow));
-            MessageBox.Show(this, ex.Message, "Delete account", MessageBoxButton.OK, MessageBoxImage.Error);
-        }
+        _locked = true;
+        PageHost.Visibility = Visibility.Collapsed;
+        LockOverlay.Visibility = Visibility.Visible;
+        LoggingConfiguration.LogInfo("Auto-lock engaged.", nameof(MainWindow));
     }
 
-    private void CopyButton_Click(object sender, RoutedEventArgs e)
+    private void Unlock_Click(object sender, RoutedEventArgs e)
     {
-        if (AccountList.SelectedItem is not AccountRow row || string.IsNullOrWhiteSpace(row.Code) || row.Code == "------")
-        {
-            StatusText.Text = "Select an account with a code to copy.";
-            return;
-        }
-
-        Clipboard.SetText(row.Code);
-        StatusText.Text = $"Copied {row.ServiceName} code.";
+        _locked = false;
+        _lastActivityUtc = DateTime.UtcNow;
+        LockOverlay.Visibility = Visibility.Collapsed;
+        PageHost.Visibility = Visibility.Visible;
+        if (CodesPage.Visibility == Visibility.Visible)
+            CodesPage.RefreshCodes();
+        LoggingConfiguration.LogInfo("Auto-lock cleared.", nameof(MainWindow));
     }
 
-    private async Task LoadAccountsAsync()
+    private void CodesNav_Click(object sender, RoutedEventArgs e) => ShowPage(CodesPage);
+
+    private async void BackupNav_Click(object sender, RoutedEventArgs e)
     {
-        var selectedId = (AccountList.SelectedItem as AccountRow)?.Id;
-        var accounts = await _database.GetAllAccountsAsync();
-
-        _rows.Clear();
-        foreach (var account in accounts)
-        {
-            _rows.Add(new AccountRow
-            {
-                Id = account.Id,
-                ServiceName = account.ServiceName,
-                Username = account.Username,
-                Account = account
-            });
-        }
-
-        if (selectedId is int id)
-            AccountList.SelectedItem = _rows.FirstOrDefault(row => row.Id == id);
-
-        EmptyText.Visibility = _rows.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
-        RefreshCodes();
+        ShowPage(BackupPage);
+        await BackupPage.ReloadAsync();
     }
 
-    private void RefreshCodes()
+    private async void SettingsNav_Click(object sender, RoutedEventArgs e)
     {
-        foreach (var row in _rows)
-        {
-            try
-            {
-                row.Code = TotpService.GenerateCode(row.Account);
-                row.SecondsRemaining = _totp.GetSecondsRemaining(row.Account);
-            }
-            catch (Exception ex)
-            {
-                row.Code = "------";
-                row.SecondsRemaining = 0;
-                LoggingConfiguration.LogException(ex, $"Failed to refresh code for account id {row.Id}.", nameof(MainWindow));
-            }
-        }
+        ShowPage(SettingsPage);
+        await SettingsPage.ReloadAsync();
     }
 
-    private sealed class AccountRow : INotifyPropertyChanged
+    private void ShowPage(UIElement page)
     {
-        public int Id { get; init; }
-        public string ServiceName { get; init; } = string.Empty;
-        public string Username { get; init; } = string.Empty;
-        public required Account Account { get; init; }
+        CodesPage.Visibility = page == CodesPage ? Visibility.Visible : Visibility.Collapsed;
+        BackupPage.Visibility = page == BackupPage ? Visibility.Visible : Visibility.Collapsed;
+        SettingsPage.Visibility = page == SettingsPage ? Visibility.Visible : Visibility.Collapsed;
+        SetNavBrush(CodesNavButton, page == CodesPage);
+        SetNavBrush(BackupNavButton, page == BackupPage);
+        SetNavBrush(SettingsNavButton, page == SettingsPage);
+    }
 
-        private string _code = string.Empty;
-        public string Code
-        {
-            get => _code;
-            set
-            {
-                if (_code == value)
-                    return;
-                _code = value;
-                OnPropertyChanged();
-            }
-        }
-
-        private int _secondsRemaining;
-        public int SecondsRemaining
-        {
-            get => _secondsRemaining;
-            set
-            {
-                if (_secondsRemaining == value)
-                    return;
-                _secondsRemaining = value;
-                OnPropertyChanged();
-            }
-        }
-
-        public event PropertyChangedEventHandler? PropertyChanged;
-
-        private void OnPropertyChanged([CallerMemberName] string? propertyName = null)
-            => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
+    private static void SetNavBrush(System.Windows.Controls.Button button, bool selected)
+    {
+        button.Foreground = selected
+            ? new SolidColorBrush(Color.FromRgb(0, 120, 212))
+            : new SolidColorBrush(Color.FromRgb(107, 114, 128));
     }
 }
