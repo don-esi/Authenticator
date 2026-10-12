@@ -19,13 +19,4 @@
     <PackageReference Include="Serilog.Sinks.Debug" Version="3.0.0" />
     <PackageReference Include="Serilog.Sinks.File" Version="7.0.0" />
   </ItemGroup>
-
-  <ItemGroup>
-    <Compile Include="..\Data\**\*.cs" Link="Data\%(RecursiveDir)%(Filename)%(Extension)" />
-    <Compile Include="..\Logging\LoggingConfiguration.cs" Link="Logging\LoggingConfiguration.cs" />
-    <Compile Include="..\Services\DatabaseService.cs" Link="Services\DatabaseService.cs" />
-    <Compile Include="..\Services\QrCodeService.cs" Link="Services\QrCodeService.cs" />
-    <Compile Include="..\Services\SettingsService.cs" Link="Services\SettingsService.cs" />
-    <Compile Include="..\Services\TotpService.cs" Link="Services\TotpService.cs" />
-  </ItemGroup>
 </Project>
