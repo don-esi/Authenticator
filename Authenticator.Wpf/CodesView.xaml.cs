@@ -22,6 +22,8 @@ public partial class CodesView : UserControl
     private List<Account> _accounts = [];
     private List<Folder> _folders = [];
     private int? _folderId;
+    private int _refreshSeq;
+    private bool _refreshing;
 
     public CodesView()
     {
@@ -52,22 +54,58 @@ public partial class CodesView : UserControl
 
     public void RefreshCodes()
     {
-        foreach (var row in _rows)
+        _ = RefreshCodesAsync();
+    }
+
+    private async Task RefreshCodesAsync()
+    {
+        if (_refreshing)
+            return;
+
+        _refreshing = true;
+        var seq = ++_refreshSeq;
+        var rows = _rows.ToList();
+        try
         {
-            try
+            if (rows.Count == 0)
+                return;
+
+            var codes = await _database.GetTotpCodesAsync(rows.Select(row => row.Id).ToList());
+            if (seq != _refreshSeq)
+                return;
+
+            foreach (var row in rows)
             {
-                var code = TotpService.GenerateCode(row.Account);
+                if (!codes.TryGetValue(row.Id, out var code) || string.IsNullOrWhiteSpace(code))
+                {
+                    row.RawCode = string.Empty;
+                    row.DisplayCode = "------";
+                    row.SecondsRemaining = 0;
+                    continue;
+                }
+
                 row.RawCode = code;
                 row.DisplayCode = AccountEdits.FormatCode(code);
                 row.SecondsRemaining = _totp.GetSecondsRemaining(row.Account);
             }
-            catch (Exception ex)
+        }
+        catch (Exception ex)
+        {
+            if (seq != _refreshSeq)
+                return;
+
+            foreach (var row in rows)
             {
                 row.RawCode = string.Empty;
                 row.DisplayCode = "------";
                 row.SecondsRemaining = 0;
-                LoggingConfiguration.LogException(ex, $"Failed to refresh code for account id {row.Id}.", nameof(CodesView));
             }
+
+            LoggingConfiguration.LogException(ex, "Failed to refresh TOTP codes.", nameof(CodesView));
+        }
+        finally
+        {
+            _refreshing = false;
         }
     }
 

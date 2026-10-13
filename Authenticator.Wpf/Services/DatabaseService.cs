@@ -144,6 +144,62 @@ public class DatabaseService
         return count;
     }
 
+    /// <summary>
+    /// Current TOTP digits from dbo.GetTotp. Missing account or bad secret is null.
+    /// Does not read or log SecretKey.
+    /// </summary>
+    public async Task<Dictionary<int, string?>> GetTotpCodesAsync(IReadOnlyCollection<int> accountIds)
+    {
+        var codes = new Dictionary<int, string?>();
+        if (accountIds is null || accountIds.Count == 0)
+            return codes;
+
+        var ids = accountIds.Distinct().ToList();
+        LoggingConfiguration.LogDebug($"Loading TOTP codes for {ids.Count} account id(s).", nameof(DatabaseService));
+
+        using var context = new AuthenticatorDbContext();
+        var connection = context.Database.GetDbConnection();
+        await context.Database.OpenConnectionAsync();
+        try
+        {
+            using var command = connection.CreateCommand();
+            var names = new List<string>(ids.Count);
+            for (var i = 0; i < ids.Count; i++)
+            {
+                var parameter = command.CreateParameter();
+                parameter.ParameterName = "@id" + i;
+                parameter.Value = ids[i];
+                command.Parameters.Add(parameter);
+                names.Add(parameter.ParameterName);
+            }
+
+            command.CommandText =
+                "SELECT a.Id, dbo.GetTotp(a.Id) AS Code FROM dbo.Accounts AS a WHERE a.Id IN (" +
+                string.Join(", ", names) + ")";
+
+            using var reader = await command.ExecuteReaderAsync();
+            while (await reader.ReadAsync())
+            {
+                var id = reader.GetInt32(0);
+                string? code = null;
+                if (!reader.IsDBNull(1))
+                {
+                    var raw = reader.GetString(1).TrimEnd();
+                    if (raw.Length > 0)
+                        code = raw;
+                }
+
+                codes[id] = code;
+            }
+        }
+        finally
+        {
+            await context.Database.CloseConnectionAsync();
+        }
+
+        return codes;
+    }
+
     // Folders
 
     public async Task<List<Folder>> GetAllFoldersAsync()
