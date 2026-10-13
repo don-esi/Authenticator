@@ -278,7 +278,16 @@ public partial class AddAccountWindow : Window
             return;
 
         _busy = true;
-        Hide();
+        // Hide() ends ShowDialog, so Save can no longer set DialogResult.
+        // Stay visible to WPF and move off the monitor until the capture finishes.
+        var restoreOpacity = Opacity;
+        var restoreLeft = Left;
+        var restoreTop = Top;
+        Opacity = 0;
+        if (!double.IsNaN(restoreLeft))
+            Left = -20000;
+        if (!double.IsNaN(restoreTop))
+            Top = -20000;
         try
         {
             var region = QrCaptureWindow.Select();
@@ -312,11 +321,13 @@ public partial class AddAccountWindow : Window
         finally
         {
             _busy = false;
+            Opacity = restoreOpacity;
+            if (!double.IsNaN(restoreLeft))
+                Left = restoreLeft;
+            if (!double.IsNaN(restoreTop))
+                Top = restoreTop;
             if (IsLoaded)
-            {
-                Show();
                 Activate();
-            }
         }
     }
 
