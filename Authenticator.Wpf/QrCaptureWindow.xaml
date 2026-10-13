@@ -1,0 +1,41 @@
+<Window x:Class="Authenticator.QrCaptureWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Capture QR"
+        WindowStyle="None"
+        ResizeMode="NoResize"
+        WindowStartupLocation="Manual"
+        AllowsTransparency="True"
+        Background="#40000000"
+        ShowInTaskbar="False"
+        Topmost="True"
+        ShowActivated="True"
+        Focusable="True"
+        Cursor="Cross"
+        PreviewKeyDown="Window_PreviewKeyDown"
+        MouseLeftButtonDown="Window_MouseLeftButtonDown"
+        MouseMove="Window_MouseMove"
+        MouseLeftButtonUp="Window_MouseLeftButtonUp">
+    <Grid>
+        <Canvas x:Name="Surface" Background="Transparent" />
+        <Rectangle x:Name="Selection"
+                   Stroke="White"
+                   StrokeThickness="2"
+                   Fill="#18FFFFFF"
+                   Visibility="Collapsed"
+                   IsHitTestVisible="False"
+                   HorizontalAlignment="Left"
+                   VerticalAlignment="Top" />
+        <Border Background="#CC111827"
+                CornerRadius="8"
+                Padding="16,8"
+                HorizontalAlignment="Center"
+                VerticalAlignment="Top"
+                Margin="0,28,0,0"
+                IsHitTestVisible="False">
+            <TextBlock Text="Drag around the QR code. Press Esc to cancel."
+                       Foreground="White"
+                       FontSize="16" />
+        </Border>
+    </Grid>
+</Window>

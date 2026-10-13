@@ -2,6 +2,7 @@ using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Controls;
 using System.Windows.Media;
+using System.Windows.Threading;
 using Authenticator.Data;
 using Authenticator.Data.Models;
 using Authenticator.Logging;
@@ -268,6 +269,54 @@ public partial class AddAccountWindow : Window
         {
             LoggingConfiguration.LogException(ex, "Failed to decode a QR image.", nameof(AddAccountWindow));
             ErrorText.Text = "Could not read that image.";
+        }
+    }
+
+    private async void CaptureQr_Click(object sender, RoutedEventArgs e)
+    {
+        if (_busy)
+            return;
+
+        _busy = true;
+        Hide();
+        try
+        {
+            var region = QrCaptureWindow.Select();
+            if (region is null)
+                return;
+
+            await Dispatcher.InvokeAsync(static () => { }, DispatcherPriority.ApplicationIdle);
+            await Task.Delay(100);
+
+            using var bitmap = await _qr.CaptureScreenRegionAsync(region.Value.X, region.Value.Y, region.Value.Width, region.Value.Height);
+            if (bitmap is null)
+            {
+                ErrorText.Text = "Could not capture that region.";
+                return;
+            }
+
+            var parsed = _qr.DecodeQrCode(bitmap);
+            if (parsed is null)
+            {
+                ErrorText.Text = "No otpauth://totp QR code found in that region.";
+                return;
+            }
+
+            ApplyQr(parsed);
+        }
+        catch (Exception ex)
+        {
+            LoggingConfiguration.LogException(ex, "Failed to capture a QR region.", nameof(AddAccountWindow));
+            ErrorText.Text = "Could not capture that region.";
+        }
+        finally
+        {
+            _busy = false;
+            if (IsLoaded)
+            {
+                Show();
+                Activate();
+            }
         }
     }
 

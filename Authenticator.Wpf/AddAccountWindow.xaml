@@ -145,7 +145,7 @@
                 <Border Background="#F4F6FC" CornerRadius="16" Padding="16" Margin="0,12,0,0">
                     <StackPanel>
                         <TextBlock Text="QR code" FontWeight="SemiBold" FontSize="16" />
-                        <TextBlock Text="Paste an otpauth:// link, or choose an image that contains a QR code."
+                        <TextBlock Text="Paste an otpauth:// link, choose an image, or drag around a QR code on the screen."
                                    Foreground="#6B7280"
                                    TextWrapping="Wrap"
                                    Margin="0,4,0,8" />
@@ -168,6 +168,12 @@
                                 Style="{StaticResource SecondaryButton}"
                                 AutomationProperties.Name="Decode QR image"
                                 Click="DecodeImage_Click" />
+                        <Button Content="Capture QR"
+                                Margin="0,8,0,0"
+                                HorizontalAlignment="Stretch"
+                                Style="{StaticResource SecondaryButton}"
+                                AutomationProperties.Name="Capture QR"
+                                Click="CaptureQr_Click" />
                     </StackPanel>
                 </Border>
 
