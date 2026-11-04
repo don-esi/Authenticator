@@ -97,6 +97,6 @@ WITH PERMISSION_SET = UNSAFE;
 GO
 
 CREATE FUNCTION dbo.GetTotp(@AccountId INT)
-RETURNS CHAR(8)
+RETURNS NVARCHAR(8)
 AS EXTERNAL NAME [Authenticator.SqlClr].[Authenticator.SqlClr.TotpFunctions].[GetTotp];
 GO
