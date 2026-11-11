@@ -15,7 +15,7 @@ Output: `packaging\dist\AuthenticatorSetup-<version>.exe`
 
 - Publishes `Authenticator.Wpf` self-contained `win-x64` into `packaging\publish\`
 - Setup requires administrator rights
-- If registry instance `SQLEXPRESS` is missing, downloads SQL Server Express bootstrapper and silent-installs it
+- If registry instance `SQLEXPRESS` is missing, downloads SQL Server 2022 Express Core (`SQLEXPR_x64_ENU.exe`, ~280 MB), extracts it, and silent-installs instance `SQLEXPRESS`
 - Writes `%LocalAppData%\Authenticator\connection.json` for the installing user
 
-Large Express redistributables are **not** committed; they are downloaded at install time (or you may stage files under `prereqs\` for local experiments — gitignored).
+Large Express redistributables are **not** committed; they are downloaded at install time.

@@ -51,9 +51,10 @@ Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#MyAppName}}
 
 [Code]
 const
+  { SQL Server 2022 Express Core offline media (~280 MB). Prefer this over SSEI web links (they 404 / drift). }
   SqlExpressDownloadUrl =
-    'https://download.microsoft.com/download/3/8/d/38de7036-2433-4207-8e93-f960bfd23c49/SQL2022-SSEI-Expr.exe';
-  SqlExpressBootstrapper = 'SQL2022-SSEI-Expr.exe';
+    'https://download.microsoft.com/download/3/8/d/38de7036-2433-4207-8eae-06e247e17b25/SQLEXPR_x64_ENU.exe';
+  SqlExpressPackage = 'SQLEXPR_x64_ENU.exe';
 
 function SqlExpressInstanceExists: Boolean;
 var
@@ -99,20 +100,23 @@ end;
 
 function InstallSqlExpress: Boolean;
 var
-  TmpPath: String;
+  TmpPath, ExtractDir, SetupExe: String;
   ResultCode: Integer;
   Args: String;
 begin
   Result := False;
-  TmpPath := ExpandConstant('{tmp}\' + SqlExpressBootstrapper);
+  TmpPath := ExpandConstant('{tmp}\' + SqlExpressPackage);
+  ExtractDir := ExpandConstant('{tmp}\SQLExpressMedia');
+  SetupExe := ExtractDir + '\SETUP.exe';
 
-  WizardForm.StatusLabel.Caption := 'Downloading SQL Server Express…';
+  WizardForm.StatusLabel.Caption := 'Downloading SQL Server Express (~280 MB)…';
   try
-    DownloadTemporaryFile(SqlExpressDownloadUrl, SqlExpressBootstrapper, '', nil);
+    DownloadTemporaryFile(SqlExpressDownloadUrl, SqlExpressPackage, '', nil);
   except
     MsgBox(
       'Could not download SQL Server Express.' + #13#10 + #13#10 +
       'Install SQL Server Express (instance name SQLEXPRESS) manually, then re-run Setup.' + #13#10 + #13#10 +
+      'https://www.microsoft.com/en-us/sql-server/sql-server-downloads' + #13#10 + #13#10 +
       GetExceptionMessage,
       mbError,
       MB_OK);
@@ -125,20 +129,38 @@ begin
     Exit;
   end;
 
-  { SQL2022-SSEI-Expr.exe is the Express bootstrapper; it downloads engine media then installs. }
-  WizardForm.StatusLabel.Caption := 'Installing SQL Server Express (SQLEXPRESS)…';
-  Args :=
-    '/ACTION=Install /FEATURES=SQL /INSTANCENAME=SQLEXPRESS ' +
-    '/IACCEPTSQLSERVERLICENSETERMS /QUIET /HIDEPROGRESSBAR=1 ' +
-    '/SQLSYSADMINACCOUNTS="Builtin\Administrators"';
-
-  if not Exec(TmpPath, Args, '', SW_SHOW, ewWaitUntilTerminated, ResultCode) then
+  ForceDirectories(ExtractDir);
+  WizardForm.StatusLabel.Caption := 'Extracting SQL Server Express media…';
+  if not Exec(TmpPath, '/Q /x:"' + ExtractDir + '"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode) then
   begin
-    MsgBox('Failed to start SQL Server Express installer.', mbError, MB_OK);
+    MsgBox('Failed to extract SQL Server Express media.', mbError, MB_OK);
     Exit;
   end;
 
-  if (ResultCode <> 0) and (not SqlExpressInstanceExists) then
+  if (ResultCode <> 0) or (not FileExists(SetupExe)) then
+  begin
+    MsgBox(
+      'SQL Server Express media extract failed (exit code ' + IntToStr(ResultCode) + ').',
+      mbError,
+      MB_OK);
+    Exit;
+  end;
+
+  WizardForm.StatusLabel.Caption := 'Installing SQL Server Express (SQLEXPRESS)…';
+  Args :=
+    '/Q /ACTION=Install /FEATURES=SQLENGINE /INSTANCENAME=SQLEXPRESS /INSTANCEID=SQLEXPRESS ' +
+    '/IACCEPTSQLSERVERLICENSETERMS /UPDATEENABLED=0 /UpdateEnabled=0 ' +
+    '/SQLSYSADMINACCOUNTS="Builtin\Administrators" ' +
+    '/AGTSVCACCOUNT="NT AUTHORITY\NETWORK SERVICE" /SQLSVCACCOUNT="NT AUTHORITY\NETWORK SERVICE"';
+
+  if not Exec(SetupExe, Args, '', SW_HIDE, ewWaitUntilTerminated, ResultCode) then
+  begin
+    MsgBox('Failed to start SQL Server Express setup.exe.', mbError, MB_OK);
+    Exit;
+  end;
+
+  { 0 = success; 3010 = success, reboot required }
+  if (ResultCode <> 0) and (ResultCode <> 3010) and (not SqlExpressInstanceExists) then
   begin
     MsgBox(
       'SQL Server Express install failed (exit code ' + IntToStr(ResultCode) + ').' + #13#10 +
