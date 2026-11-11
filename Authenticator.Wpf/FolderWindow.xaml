@@ -1,18 +1,18 @@
 <Window x:Class="Authenticator.FolderWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Create folder"
-        Height="280"
+        Title="Create Folder"
+        Height="760"
         Width="420"
-        MinHeight="260"
-        MinWidth="360"
-        ResizeMode="NoResize"
+        MinHeight="640"
+        MinWidth="420"
+        ResizeMode="CanResize"
         WindowStartupLocation="CenterOwner"
         ShowInTaskbar="False"
-        Background="#F8F9FA"
+        Background="{DynamicResource PageBackgroundBrush}"
         FontFamily="Segoe UI"
         FontSize="14"
-        Foreground="#1F2937"
+        Foreground="{DynamicResource PrimaryTextBrush}"
         Loaded="Window_Loaded">
     <Grid>
         <Grid.RowDefinitions>
@@ -20,18 +20,33 @@
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
 
-        <Border Background="White" BorderBrush="#E5E7EB" BorderThickness="0,0,0,1" Padding="8,6">
+        <Border Background="White"
+                BorderBrush="#E5E7EB"
+                BorderThickness="0,0,0,1"
+                Padding="8,10">
             <Grid>
-                <Button Content="Cancel"
-                        HorizontalAlignment="Left"
+                <Button HorizontalAlignment="Left"
                         IsCancel="True"
                         Style="{StaticResource TextActionButton}"
-                        AutomationProperties.Name="Cancel" />
-                <TextBlock Text="Create folder"
-                           FontSize="18"
-                           FontWeight="SemiBold"
-                           HorizontalAlignment="Center"
-                           VerticalAlignment="Center" />
+                        AutomationProperties.Name="Back"
+                        ToolTip="Back">
+                    <TextBlock FontFamily="Segoe MDL2 Assets" FontSize="18" Foreground="#0078D4" Text="&#xE76B;" />
+                </Button>
+                <StackPanel Orientation="Horizontal"
+                            HorizontalAlignment="Center"
+                            VerticalAlignment="Center">
+                    <TextBlock FontFamily="Segoe MDL2 Assets"
+                               FontSize="16"
+                               Foreground="#6B7280"
+                               Text="&#xE8B7;"
+                               VerticalAlignment="Center"
+                               Margin="0,0,6,0" />
+                    <TextBlock x:Name="TitleText"
+                               Text="Create Folder"
+                               FontSize="17"
+                               FontWeight="SemiBold"
+                               VerticalAlignment="Center" />
+                </StackPanel>
                 <Button x:Name="SaveButton"
                         Content="Save"
                         HorizontalAlignment="Right"
@@ -41,23 +56,176 @@
             </Grid>
         </Border>
 
-        <StackPanel Grid.Row="1" Margin="16">
-            <Border Background="#F4F6FC" CornerRadius="16" Padding="16">
-                <StackPanel>
-                    <TextBlock Text="Name" Foreground="#6B7280" />
-                    <TextBox x:Name="NameBox"
-                             Style="{StaticResource FieldBox}"
-                             MaxLength="100"
-                             Margin="0,2,0,12"
-                             AutomationProperties.Name="Folder name" />
-                    <TextBlock Text="Color" Foreground="#6B7280" Margin="0,0,0,8" />
-                    <StackPanel x:Name="ColorPanel" Orientation="Horizontal" />
-                </StackPanel>
+        <Grid Grid.Row="1" Margin="16,12,16,12">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+
+            <Border Background="#F4F6FC" CornerRadius="14" Padding="14">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+
+                    <Border Width="56"
+                            Height="56"
+                            CornerRadius="12"
+                            Background="Transparent"
+                            VerticalAlignment="Top"
+                            Margin="0,2,14,0">
+                        <TextBlock x:Name="FolderPreviewIcon"
+                                   FontFamily="Segoe MDL2 Assets"
+                                   Text="&#xE8B7;"
+                                   FontSize="40"
+                                   Foreground="#F38181"
+                                   HorizontalAlignment="Center"
+                                   VerticalAlignment="Center" />
+                    </Border>
+
+                    <StackPanel Grid.Column="1">
+                        <TextBlock Text="Name" Foreground="#6B7280" FontSize="12" />
+                        <TextBox x:Name="NameBox"
+                                 Style="{StaticResource FieldBox}"
+                                 Text="New Folder"
+                                 MaxLength="100"
+                                 Margin="0,0,0,10"
+                                 AutomationProperties.Name="Folder name" />
+                        <TextBlock Text="Color" Foreground="#6B7280" FontSize="12" Margin="0,0,0,6" />
+                        <StackPanel x:Name="ColorPanel" Orientation="Horizontal" />
+                    </StackPanel>
+                </Grid>
             </Border>
+
+            <Grid Grid.Row="1" Margin="0,12,0,8">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <Border Background="#F3F4F6" CornerRadius="10" Padding="10,6">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <TextBlock FontFamily="Segoe MDL2 Assets"
+                                   Text="&#xE721;"
+                                   FontSize="14"
+                                   Foreground="#0078D4"
+                                   VerticalAlignment="Center"
+                                   Margin="0,0,8,0" />
+                        <Grid Grid.Column="1">
+                            <TextBlock x:Name="SearchHint"
+                                       Text="Search"
+                                       Foreground="#9CA3AF"
+                                       IsHitTestVisible="False"
+                                       VerticalAlignment="Center" />
+                            <TextBox x:Name="SearchBox"
+                                     AutomationProperties.Name="Search accounts"
+                                     Background="Transparent"
+                                     BorderThickness="0"
+                                     FontSize="14"
+                                     TextChanged="SearchBox_TextChanged" />
+                        </Grid>
+                    </Grid>
+                </Border>
+                <Button Grid.Column="1"
+                        Margin="6,0,0,0"
+                        Style="{StaticResource IconButton}"
+                        ToolTip="Sort"
+                        AutomationProperties.Name="Sort accounts"
+                        Click="Sort_Click">
+                    <TextBlock FontFamily="Segoe MDL2 Assets" FontSize="16" Foreground="#0078D4" Text="&#xE8CB;" />
+                </Button>
+            </Grid>
+
+            <TextBlock x:Name="EmptyPickText"
+                       Grid.Row="2"
+                       Text="No accounts yet."
+                       Foreground="#6B7280"
+                       Margin="0,0,0,6"
+                       Visibility="Collapsed" />
+
+            <ScrollViewer Grid.Row="3" VerticalScrollBarVisibility="Auto">
+                <ItemsControl x:Name="AccountList">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <Border Margin="0,0,0,6"
+                                    Padding="10,8"
+                                    Background="#F4F6FC"
+                                    CornerRadius="12"
+                                    Cursor="Hand"
+                                    MouseLeftButtonUp="AccountRow_MouseLeftButtonUp">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+
+                                    <Ellipse Width="22"
+                                             Height="22"
+                                             Stroke="#9CA3AF"
+                                             StrokeThickness="2"
+                                             Fill="Transparent"
+                                             VerticalAlignment="Center"
+                                             Margin="0,0,10,0"
+                                             Visibility="{Binding UncheckedVisibility}" />
+                                    <Grid Width="22"
+                                          Height="22"
+                                          VerticalAlignment="Center"
+                                          Margin="0,0,10,0"
+                                          Visibility="{Binding CheckedVisibility}">
+                                        <Ellipse Fill="#0078D4" />
+                                        <TextBlock FontFamily="Segoe MDL2 Assets"
+                                                   Text="&#xE73E;"
+                                                   FontSize="12"
+                                                   Foreground="White"
+                                                   HorizontalAlignment="Center"
+                                                   VerticalAlignment="Center" />
+                                    </Grid>
+
+                                    <Border Grid.Column="1"
+                                            Width="36"
+                                            Height="36"
+                                            CornerRadius="8"
+                                            Background="{Binding InitialBrush}"
+                                            VerticalAlignment="Center"
+                                            Margin="0,0,10,0">
+                                        <TextBlock Text="{Binding Initial}"
+                                                   Foreground="White"
+                                                   FontSize="15"
+                                                   FontWeight="SemiBold"
+                                                   HorizontalAlignment="Center"
+                                                   VerticalAlignment="Center" />
+                                    </Border>
+
+                                    <StackPanel Grid.Column="2" VerticalAlignment="Center">
+                                        <TextBlock Text="{Binding ServiceName}"
+                                                   FontWeight="SemiBold"
+                                                   FontSize="14"
+                                                   TextTrimming="CharacterEllipsis" />
+                                        <TextBlock Text="{Binding Username}"
+                                                   Foreground="#6B7280"
+                                                   FontSize="12"
+                                                   TextTrimming="CharacterEllipsis" />
+                                    </StackPanel>
+                                </Grid>
+                            </Border>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </ScrollViewer>
+
             <TextBlock x:Name="ErrorText"
+                       Grid.Row="4"
                        Foreground="#B00020"
                        TextWrapping="Wrap"
-                       Margin="4,12,4,0" />
-        </StackPanel>
+                       Margin="0,8,0,0" />
+        </Grid>
     </Grid>
 </Window>

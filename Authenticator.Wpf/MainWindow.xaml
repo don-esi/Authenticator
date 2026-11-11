@@ -8,11 +8,15 @@
 	Height="900"
 	MinWidth="420"
 	MinHeight="640"
-	Background="#F8F9FA"
+	Icon="pack://application:,,,/Assets/app.ico"
+	Background="{DynamicResource PageBackgroundBrush}"
+	Foreground="{DynamicResource PrimaryTextBrush}"
+	Activated="Window_Activated"
+	Deactivated="Window_Deactivated"
+	Closing="Window_Closing"
 	Closed="Window_Closed"
 	FontFamily="Segoe UI"
 	FontSize="14"
-	Foreground="#1F2937"
 	Loaded="Window_Loaded"
 	PreviewKeyDown="Window_PreviewActivity"
 	PreviewMouseDown="Window_PreviewActivity"
@@ -33,14 +37,15 @@
 		<Border
 			Grid.Row="1"
 			Padding="8,6"
-			Background="White"
-			BorderBrush="#E5E7EB"
+			Background="{DynamicResource NavBarBackgroundBrush}"
+			BorderBrush="{DynamicResource BorderBrushColor}"
 			BorderThickness="0,1,0,0">
 			<Grid>
 				<Grid.ColumnDefinitions>
 					<ColumnDefinition Width="*" />
 					<ColumnDefinition Width="*" />
 					<ColumnDefinition Width="*" />
+					<ColumnDefinition Width="Auto" />
 				</Grid.ColumnDefinitions>
 				<Button
 					x:Name="CodesNavButton"
@@ -65,7 +70,7 @@
 					Grid.Column="1"
 					AutomationProperties.Name="Backup Codes"
 					Click="BackupNav_Click"
-					Foreground="#6B7280"
+					Foreground="{DynamicResource SecondaryTextBrush}"
 					Style="{StaticResource TextActionButton}">
 					<StackPanel>
 						<TextBlock
@@ -84,7 +89,7 @@
 					Grid.Column="2"
 					AutomationProperties.Name="Settings"
 					Click="SettingsNav_Click"
-					Foreground="#6B7280"
+					Foreground="{DynamicResource SecondaryTextBrush}"
 					Style="{StaticResource TextActionButton}">
 					<StackPanel>
 						<TextBlock
@@ -98,37 +103,117 @@
 							Text="Settings" />
 					</StackPanel>
 				</Button>
+				<Button
+					x:Name="CollapseDockButton"
+					Grid.Column="3"
+					Margin="4,0,0,0"
+					Padding="10,4"
+					VerticalAlignment="Center"
+					AutomationProperties.Name="Collapse to dock"
+					Click="CollapseDock_Click"
+					Style="{StaticResource SecondaryButton}"
+					ToolTip="Collapse to edge handle"
+					Visibility="Collapsed">
+					<TextBlock
+						FontFamily="Segoe MDL2 Assets"
+						FontSize="16"
+						Text="&#xE76C;" />
+				</Button>
 			</Grid>
 		</Border>
 
 		<Grid
 			x:Name="LockOverlay"
 			Grid.RowSpan="2"
-			Background="#F8F9FA"
+			Background="{DynamicResource PageBackgroundBrush}"
+			FocusManager.IsFocusScope="True"
+			PreviewTextInput="LockOverlay_PreviewTextInput"
+			PreviewKeyDown="LockOverlay_PreviewKeyDown"
 			Visibility="Collapsed">
-			<StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
+			<StackPanel
+				Width="280"
+				HorizontalAlignment="Center"
+				VerticalAlignment="Center">
 				<TextBlock
 					HorizontalAlignment="Center"
 					FontFamily="Segoe MDL2 Assets"
 					FontSize="42"
-					Foreground="#0078D4"
+					Foreground="{DynamicResource BrandBlueBrush}"
 					Text="&#xE72E;" />
 				<TextBlock
 					Margin="0,12,0,0"
 					HorizontalAlignment="Center"
 					FontSize="28"
 					FontWeight="SemiBold"
+					Foreground="{DynamicResource PrimaryTextBrush}"
 					Text="Locked" />
 				<TextBlock
+					x:Name="UnlockHintText"
 					Margin="0,8,0,20"
 					HorizontalAlignment="Center"
-					Foreground="#6B7280"
-					Text="Codes are hidden until you unlock." />
-				<Button
-					Padding="28,10"
-					Click="Unlock_Click"
-					Content="Unlock"
-					Style="{StaticResource PrimaryButton}" />
+					Foreground="{DynamicResource SecondaryTextBrush}"
+					TextWrapping="Wrap"
+					TextAlignment="Center"
+					Text="Enter your PIN or touch your YubiKey." />
+
+				<StackPanel x:Name="PinUnlockPanel">
+					<PasswordBox
+						x:Name="UnlockPinBox"
+						Height="40"
+						Padding="10,8"
+						Margin="0,0,0,10"
+						Focusable="True"
+						Background="{DynamicResource SecondaryBackgroundBrush}"
+						Foreground="{DynamicResource PrimaryTextBrush}"
+						CaretBrush="{DynamicResource PrimaryTextBrush}"
+						BorderBrush="{DynamicResource BorderBrushColor}"
+						AutomationProperties.Name="PIN"
+						LostKeyboardFocus="UnlockPinBox_LostKeyboardFocus"
+						KeyDown="UnlockPinBox_KeyDown" />
+					<Button
+						Padding="28,10"
+						Click="UnlockPin_Click"
+						Content="Unlock with PIN"
+						Style="{StaticResource PrimaryButton}" />
+				</StackPanel>
+
+				<StackPanel x:Name="YubiUnlockPanel" Margin="0,4,0,0">
+					<TextBlock
+						HorizontalAlignment="Center"
+						Foreground="{DynamicResource BrandBlueBrush}"
+						Text="Waiting for YubiKey…" />
+					<!-- Receives Yubico OTP keystrokes from a touch; kept effectively invisible. -->
+					<TextBox
+						x:Name="YubiOtpCaptureBox"
+						Height="1"
+						Margin="0,8,0,0"
+						Opacity="0.01"
+						BorderThickness="0"
+						CaretBrush="Transparent"
+						Foreground="Transparent"
+						Background="Transparent"
+						Focusable="True"
+						IsTabStop="False"
+						TextChanged="YubiOtpCaptureBox_TextChanged"
+						PreviewKeyDown="YubiOtpCaptureBox_PreviewKeyDown"
+						AutomationProperties.Name="YubiKey OTP capture" />
+				</StackPanel>
+
+				<StackPanel x:Name="HelloUnlockPanel" Margin="0,12,0,0" Visibility="Collapsed">
+					<Button
+						Padding="28,10"
+						Click="UnlockHello_Click"
+						Content="Unlock with Windows Hello"
+						Style="{StaticResource PrimaryButton}" />
+				</StackPanel>
+
+				<TextBlock
+					x:Name="UnlockErrorText"
+					Margin="0,14,0,0"
+					HorizontalAlignment="Center"
+					Foreground="{DynamicResource DangerBrush}"
+					TextWrapping="Wrap"
+					TextAlignment="Center" />
 			</StackPanel>
 		</Grid>
 	</Grid>

@@ -1,0 +1,26 @@
+<Window x:Class="Authenticator.DockHandleWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Authenticator dock"
+        Width="28"
+        Height="56"
+        WindowStyle="None"
+        ResizeMode="NoResize"
+        WindowStartupLocation="Manual"
+        AllowsTransparency="True"
+        Background="Transparent"
+        ShowInTaskbar="False"
+        Topmost="True"
+        ShowActivated="False"
+        Focusable="False"
+        Cursor="Hand">
+	<!-- Full-window hit target; half-pill peeking from the screen edge -->
+	<Border x:Name="HandleChrome"
+	        Background="#E53935"
+	        CornerRadius="0,28,28,0"
+	        MouseEnter="Handle_MouseEnter"
+	        MouseLeave="Handle_MouseLeave"
+	        MouseLeftButtonDown="Handle_MouseLeftButtonDown"
+	        MouseMove="Handle_MouseMove"
+	        MouseLeftButtonUp="Handle_MouseLeftButtonUp" />
+</Window>

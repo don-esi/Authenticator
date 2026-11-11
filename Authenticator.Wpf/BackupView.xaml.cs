@@ -1,3 +1,5 @@
+using System.ComponentModel;
+using System.Runtime.CompilerServices;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
@@ -11,10 +13,21 @@ public partial class BackupView : UserControl
     private readonly DatabaseService _database = new();
     private List<BackupAccountRow> _accounts = [];
     private int? _openAccountId;
+    private bool _codesMasked;
 
     public BackupView()
     {
         InitializeComponent();
+    }
+
+    public void SetCodesMasked(bool masked)
+    {
+        _codesMasked = masked;
+        foreach (var account in _accounts)
+        {
+            foreach (var code in account.Codes)
+                code.ApplyMask(masked);
+        }
     }
 
     public async Task ReloadAsync()
@@ -34,11 +47,16 @@ public partial class BackupView : UserControl
                         Initial = AccountEdits.Initial(account.ServiceName),
                         InitialBrush = AccountEdits.InitialBrush(account.ServiceName),
                         Available = codes.Count(code => !code.IsUsed),
-                        Codes = codes.Select(code => new BackupCodeRow
+                        Codes = codes.Select(code =>
                         {
-                            Id = code.Id,
-                            Code = code.Code,
-                            IsUsed = code.IsUsed
+                            var row = new BackupCodeRow
+                            {
+                                Id = code.Id,
+                                RawCode = code.Code,
+                                IsUsed = code.IsUsed
+                            };
+                            row.ApplyMask(_codesMasked);
+                            return row;
                         }).ToList()
                     };
                 })
@@ -82,10 +100,24 @@ public partial class BackupView : UserControl
 
     private void CopyCode_Click(object sender, RoutedEventArgs e)
     {
-        if (sender is not Button { Tag: BackupCodeRow row } || string.IsNullOrWhiteSpace(row.Code))
+        if (sender is not Button { Tag: BackupCodeRow row })
             return;
 
-        Clipboard.SetText(row.Code);
+        if (_codesMasked)
+        {
+            MessageBox.Show(
+                Window.GetWindow(this),
+                "Move the mouse or press a key to show backup codes again.",
+                "Codes hidden",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(row.RawCode))
+            return;
+
+        Clipboard.SetText(row.RawCode);
     }
 
     private async void MarkUsed_Click(object sender, RoutedEventArgs e)
@@ -122,11 +154,40 @@ public sealed class BackupAccountRow
     public List<BackupCodeRow> Codes { get; init; } = [];
 }
 
-public sealed class BackupCodeRow
+public sealed class BackupCodeRow : INotifyPropertyChanged
 {
     public int Id { get; init; }
-    public string Code { get; init; } = string.Empty;
+    public string RawCode { get; init; } = string.Empty;
     public bool IsUsed { get; init; }
     public bool CanMarkUsed => !IsUsed;
     public string Status => IsUsed ? "Used" : "Available";
+
+    private string _code = string.Empty;
+    public string Code
+    {
+        get => _code;
+        private set
+        {
+            if (_code == value)
+                return;
+            _code = value;
+            OnPropertyChanged();
+        }
+    }
+
+    public void ApplyMask(bool masked)
+    {
+        if (string.IsNullOrEmpty(RawCode))
+        {
+            Code = string.Empty;
+            return;
+        }
+
+        Code = masked ? new string('•', Math.Max(8, RawCode.Length)) : RawCode;
+    }
+
+    public event PropertyChangedEventHandler? PropertyChanged;
+
+    private void OnPropertyChanged([CallerMemberName] string? name = null) =>
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
 }

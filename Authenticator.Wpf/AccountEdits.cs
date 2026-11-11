@@ -53,6 +53,7 @@ internal static class AccountEdits
     {
         return secretKey.Replace(" ", string.Empty, StringComparison.Ordinal)
                         .Replace("-", string.Empty, StringComparison.Ordinal)
+                        .Replace("=", string.Empty, StringComparison.Ordinal)
                         .Trim()
                         .ToUpperInvariant();
     }

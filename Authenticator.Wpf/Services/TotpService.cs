@@ -50,13 +50,25 @@ public class TotpService
     }
 
     /// <summary>
-    /// Gets the number of seconds remaining until the next code regeneration.
+    /// Gets the whole seconds remaining until the next code regeneration.
     /// </summary>
     public int GetSecondsRemaining(Account account)
     {
+        var remaining = GetSecondsRemainingExact(account);
+        var whole = (int)Math.Ceiling(remaining);
+        return whole <= 0 ? (account.Period <= 0 ? 30 : account.Period) : whole;
+    }
+
+    /// <summary>
+    /// Gets the fractional seconds remaining until the next code regeneration.
+    /// </summary>
+    public double GetSecondsRemainingExact(Account account)
+    {
         ArgumentNullException.ThrowIfNull(account);
-        var remaining = account.Period - (int)(DateTimeOffset.UtcNow.ToUnixTimeSeconds() % account.Period);
-        return remaining == 0 ? account.Period : remaining;
+        var period = account.Period <= 0 ? 30 : account.Period;
+        var nowSeconds = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() / 1000.0;
+        var remaining = period - (nowSeconds % period);
+        return remaining <= 0 ? period : remaining;
     }
 
     /// <summary>
@@ -66,8 +78,8 @@ public class TotpService
     public double GetProgress(Account account)
     {
         ArgumentNullException.ThrowIfNull(account);
-        var secondsRemaining = GetSecondsRemaining(account);
-        return (double)secondsRemaining / account.Period;
+        var period = account.Period <= 0 ? 30 : account.Period;
+        return GetSecondsRemainingExact(account) / period;
     }
 
     /// <summary>

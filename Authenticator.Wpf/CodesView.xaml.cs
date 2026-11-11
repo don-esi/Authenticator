@@ -17,26 +17,59 @@ public partial class CodesView : UserControl
 {
     private readonly DatabaseService _database = new();
     private readonly TotpService _totp = new();
-    private readonly DispatcherTimer _timer;
+    private readonly CodesUiPreferences _uiPrefs = new();
+    private readonly DispatcherTimer _codeTimer;
+    private readonly DispatcherTimer _progressTimer;
+    private readonly DispatcherTimer _toastTimer;
     private readonly ObservableCollection<AccountCardRow> _rows = new();
     private List<Account> _accounts = [];
     private List<Folder> _folders = [];
     private int? _folderId;
     private int _refreshSeq;
     private bool _refreshing;
+    private CodesSortMode _sortMode = CodesSortMode.ServiceAsc;
+    private CodesViewMode _viewMode = CodesViewMode.Condensed;
+    private AppThemeMode _themeMode = AppThemeMode.System;
+    private bool _codesMasked;
+
+    private Border? _slideFront;
+    private TranslateTransform? _slideTransform;
+    private double _slideActionWidth;
+    private Point _slideStart;
+    private double _slideOriginX;
+    private bool _slideMoved;
+
+    private const double FolderActionWidth = 96;
+    private const double AccountActionWidth = 140;
+    private const double SlideOpenThreshold = 0.4;
 
     public CodesView()
     {
         InitializeComponent();
         AccountList.ItemsSource = _rows;
-        _timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
-        _timer.Tick += (_, _) => RefreshCodes();
+        LoadUiPrefs();
+        ApplyViewMode();
+        _codeTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
+        _codeTimer.Tick += (_, _) => RefreshCodes();
+        _progressTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(50) };
+        _progressTimer.Tick += (_, _) => UpdateProgress();
+        _toastTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(1400) };
+        _toastTimer.Tick += (_, _) => HideStatusToast();
+    }
+
+    private void LoadUiPrefs()
+    {
+        var prefs = _uiPrefs.Load();
+        _sortMode = prefs.SortMode;
+        _viewMode = prefs.ViewMode;
+        _themeMode = prefs.ThemeMode;
     }
 
     public async Task ReloadAsync()
     {
         try
         {
+            LoadUiPrefs();
             _accounts = await _database.GetAllAccountsAsync();
             _folders = await _database.GetAllFoldersAsync();
             if (_folderId is int selected && _folders.All(folder => folder.Id != selected))
@@ -48,8 +81,16 @@ public partial class CodesView : UserControl
         {
             LoggingConfiguration.LogException(ex, "Failed to load accounts.", nameof(CodesView));
             EmptyText.Text = ex.Message;
-            EmptyText.Visibility = Visibility.Visible;
+            EmptyHint.Visibility = Visibility.Collapsed;
+            EmptyPanel.Visibility = Visibility.Visible;
         }
+    }
+
+    public void SetCodesMasked(bool masked)
+    {
+        _codesMasked = masked;
+        foreach (var row in _rows)
+            ApplyDisplayCode(row);
     }
 
     public void RefreshCodes()
@@ -70,23 +111,35 @@ public partial class CodesView : UserControl
             if (rows.Count == 0)
                 return;
 
-            var codes = await _database.GetTotpCodesAsync(rows.Select(row => row.Id).ToList());
+            // Client-side TOTP: SQL dbo.GetTotp cannot read AES-GCM secrets at rest.
+            await Task.Yield();
             if (seq != _refreshSeq)
                 return;
 
             foreach (var row in rows)
             {
-                if (!codes.TryGetValue(row.Id, out var code) || string.IsNullOrWhiteSpace(code))
+                try
                 {
+                    var code = TotpService.GenerateCode(row.Account);
+                    if (string.IsNullOrWhiteSpace(code))
+                    {
+                        row.RawCode = string.Empty;
+                        row.DisplayCode = "------";
+                        row.SecondsRemaining = 0;
+                        continue;
+                    }
+
+                    row.RawCode = code;
+                    ApplyDisplayCode(row);
+                    row.SecondsRemaining = _totp.GetSecondsRemainingExact(row.Account);
+                }
+                catch (Exception ex)
+                {
+                    LoggingConfiguration.LogException(ex, $"Failed to generate TOTP for account id {row.Id}.", nameof(CodesView));
                     row.RawCode = string.Empty;
                     row.DisplayCode = "------";
                     row.SecondsRemaining = 0;
-                    continue;
                 }
-
-                row.RawCode = code;
-                row.DisplayCode = AccountEdits.FormatCode(code);
-                row.SecondsRemaining = _totp.GetSecondsRemaining(row.Account);
             }
         }
         catch (Exception ex)
@@ -109,16 +162,33 @@ public partial class CodesView : UserControl
         }
     }
 
+    private void UpdateProgress()
+    {
+        var wrapped = false;
+        foreach (var row in _rows)
+        {
+            var remaining = _totp.GetSecondsRemainingExact(row.Account);
+            if (remaining > row.SecondsRemaining + 0.75)
+                wrapped = true;
+            row.SecondsRemaining = remaining;
+        }
+
+        if (wrapped)
+            RefreshCodes();
+    }
+
     private async void CodesView_IsVisibleChanged(object sender, DependencyPropertyChangedEventArgs e)
     {
         if (IsVisible)
         {
             await ReloadAsync();
-            _timer.Start();
+            _codeTimer.Start();
+            _progressTimer.Start();
         }
         else
         {
-            _timer.Stop();
+            _codeTimer.Stop();
+            _progressTimer.Stop();
         }
     }
 
@@ -131,8 +201,10 @@ public partial class CodesView : UserControl
 
     private void ApplyFilter()
     {
-        if (SearchBox is null || ChipPanel is null || EmptyText is null || DeleteFolderButton is null)
+        if (SearchBox is null || ChipPanel is null || EmptyPanel is null || EmptyText is null)
             return;
+
+        CloseOpenSlide();
 
         var query = SearchBox.Text.Trim();
         var filtered = _accounts.Where(account =>
@@ -143,64 +215,404 @@ public partial class CodesView : UserControl
                 return true;
             return account.ServiceName.Contains(query, StringComparison.OrdinalIgnoreCase)
                    || account.Username.Contains(query, StringComparison.OrdinalIgnoreCase);
-        })
-        .OrderByDescending(account => account.IsFavorite)
-        .ThenBy(account => account.ServiceName, StringComparer.OrdinalIgnoreCase)
-        .ThenBy(account => account.Username, StringComparer.OrdinalIgnoreCase)
-        .ToList();
+        });
+
+        filtered = ApplySort(filtered);
 
         _rows.Clear();
         foreach (var account in filtered)
             _rows.Add(AccountCardRow.From(account));
 
         var noFilters = query.Length == 0 && _folderId is null;
-        EmptyText.Text = _accounts.Count == 0 && noFilters ? "No accounts yet." : "No matching accounts.";
-        EmptyText.Visibility = _rows.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
-        DeleteFolderButton.Visibility = _folderId is null ? Visibility.Collapsed : Visibility.Visible;
+        var emptyAll = _accounts.Count == 0 && noFilters;
+        EmptyText.Text = emptyAll
+            ? "No accounts yet."
+            : _folderId is not null && query.Length == 0
+                ? "No accounts in this folder."
+                : "No matching accounts.";
+        EmptyHint.Text = emptyAll ? "Tap + to add an account" : "Try another search or folder";
+        EmptyHint.Visibility = Visibility.Visible;
+        EmptyPanel.Visibility = _rows.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
         BuildChips();
     }
 
     private void BuildChips()
     {
         ChipPanel.Children.Clear();
-        ChipPanel.Children.Add(MakeChip("All", _accounts.Count, _folderId is null, null, null));
+        ChipPanel.Children.Add(MakeFolderRow("All", _accounts.Count, _folderId is null, folder: null));
         foreach (var folder in _folders.OrderBy(folder => folder.Name, StringComparer.OrdinalIgnoreCase))
         {
             var count = _accounts.Count(account => account.FolderId == folder.Id);
-            ChipPanel.Children.Add(MakeChip(folder.Name, count, _folderId == folder.Id, folder.Id, folder.Color));
+            ChipPanel.Children.Add(MakeFolderRow(folder.Name, count, _folderId == folder.Id, folder));
         }
     }
 
-    private Button MakeChip(string label, int count, bool selected, int? folderId, string? color)
+    private FrameworkElement MakeFolderRow(string label, int count, bool selected, Folder? folder)
     {
         var background = selected
             ? "#0078D4"
-            : string.IsNullOrWhiteSpace(color) ? "#F3F4F6" : color;
-        var foreground = selected ? "White" : "#1F2937";
+            : string.IsNullOrWhiteSpace(folder?.Color) ? null : folder!.Color;
+        var foreground = selected ? "#FFFFFF" : null;
+        var muted = selected ? "#E5F1FB" : null;
+        var content = BuildFolderContent(label, count, foreground, muted, selected);
+
+        if (folder is null)
+        {
+            var allButton = new Button
+            {
+                Content = content,
+                Margin = new Thickness(0, 0, 0, 6),
+                Padding = new Thickness(12, 8, 12, 8),
+                HorizontalContentAlignment = HorizontalAlignment.Stretch,
+                HorizontalAlignment = HorizontalAlignment.Stretch,
+                Background = selected
+                    ? AccountEdits.BrushFromHex("#0078D4")
+                    : (Brush)FindResource("ChipIdleBrush"),
+                BorderThickness = new Thickness(0),
+                Cursor = Cursors.Hand,
+                Style = (Style)FindResource("ChipButton")
+            };
+            AutomationProperties.SetName(allButton, label);
+            allButton.Click += (_, _) => SelectFolder(null);
+            return allButton;
+        }
+
+        var host = new Grid
+        {
+            Margin = new Thickness(0, 0, 0, 6),
+            ClipToBounds = true,
+            Height = 40
+        };
+
+        var actions = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            HorizontalAlignment = HorizontalAlignment.Right,
+            VerticalAlignment = VerticalAlignment.Stretch
+        };
+        actions.Children.Add(MakeSlideActionButton(
+            "\uE70F", "#9CA3AF", "Edit folder", folder, FolderEdit_Click, marginRight: 4));
+        actions.Children.Add(MakeSlideActionButton(
+            "\uE74D", "#EF4444", "Delete folder", folder, FolderDelete_Click, marginRight: 0));
+
+        var front = new Border
+        {
+            Background = background is null
+                ? (Brush)FindResource("ChipIdleBrush")
+                : AccountEdits.BrushFromHex(background),
+            CornerRadius = new CornerRadius(12),
+            Padding = new Thickness(12, 8, 12, 8),
+            Cursor = Cursors.Hand,
+            Child = content,
+            Tag = new SlideTarget(SlideKind.Folder, folder.Id, FolderActionWidth),
+            RenderTransform = new TranslateTransform()
+        };
+        AutomationProperties.SetName(front, label);
+        front.MouseLeftButtonDown += Slide_MouseLeftButtonDown;
+        front.MouseMove += Slide_MouseMove;
+        front.MouseLeftButtonUp += Slide_MouseLeftButtonUp;
+        front.LostMouseCapture += Slide_LostMouseCapture;
+
+        host.Children.Add(actions);
+        host.Children.Add(front);
+        return host;
+    }
+
+    private Grid BuildFolderContent(string label, int count, string? foreground, string? muted, bool selected)
+    {
+        var fgBrush = foreground is null
+            ? (Brush)FindResource(selected ? "PrimaryTextBrush" : "ChipIdleTextBrush")
+            : AccountEdits.BrushFromHex(foreground);
+        var mutedBrush = muted is null
+            ? (Brush)FindResource(selected ? "SecondaryTextBrush" : "ChipIdleMutedBrush")
+            : AccountEdits.BrushFromHex(muted);
+
+        var content = new Grid();
+        content.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        content.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        content.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+        var folderIcon = new TextBlock
+        {
+            FontFamily = new FontFamily("Segoe MDL2 Assets"),
+            Text = "\uE8B7",
+            FontSize = 14,
+            Foreground = fgBrush,
+            VerticalAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(0, 0, 8, 0)
+        };
+        var name = new TextBlock
+        {
+            Text = label,
+            FontSize = 13,
+            FontWeight = FontWeights.SemiBold,
+            Foreground = fgBrush,
+            VerticalAlignment = VerticalAlignment.Center,
+            TextTrimming = TextTrimming.CharacterEllipsis
+        };
+        var meta = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            VerticalAlignment = VerticalAlignment.Center
+        };
+        meta.Children.Add(new TextBlock
+        {
+            Text = count.ToString(),
+            FontSize = 12,
+            Foreground = mutedBrush,
+            VerticalAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(0, 0, 6, 0)
+        });
+        meta.Children.Add(new TextBlock
+        {
+            FontFamily = new FontFamily("Segoe MDL2 Assets"),
+            Text = "\uE192",
+            FontSize = 12,
+            Foreground = mutedBrush,
+            VerticalAlignment = VerticalAlignment.Center
+        });
+
+        Grid.SetColumn(folderIcon, 0);
+        Grid.SetColumn(name, 1);
+        Grid.SetColumn(meta, 2);
+        content.Children.Add(folderIcon);
+        content.Children.Add(name);
+        content.Children.Add(meta);
+        return content;
+    }
+
+    private Button MakeSlideActionButton(
+        string glyph,
+        string background,
+        string name,
+        object tag,
+        RoutedEventHandler click,
+        double marginRight)
+    {
         var button = new Button
         {
-            Content = $"{label}  {count}",
-            Tag = folderId,
-            Margin = new Thickness(0, 0, 8, 0),
-            Padding = new Thickness(14, 8, 14, 8),
-            Foreground = AccountEdits.BrushFromHex(foreground == "White" ? "#FFFFFF" : foreground),
+            Width = 44,
+            Margin = new Thickness(0, 0, marginRight, 0),
+            VerticalAlignment = VerticalAlignment.Stretch,
+            Tag = tag,
             Background = AccountEdits.BrushFromHex(background),
-            BorderThickness = new Thickness(selected && color is not null ? 2 : 0),
-            BorderBrush = AccountEdits.BrushFromHex("#1F2937"),
-            Cursor = Cursors.Hand,
-            FontWeight = FontWeights.SemiBold,
-            Style = (Style)FindResource("ChipButton")
+            Style = (Style)FindResource("SlideActionButton"),
+            ToolTip = name,
+            Content = new TextBlock
+            {
+                FontFamily = new FontFamily("Segoe MDL2 Assets"),
+                Text = glyph,
+                FontSize = 16,
+                Foreground = Brushes.White,
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Center
+            }
         };
-        AutomationProperties.SetName(button, label);
-        button.Click += FolderChip_Click;
+        AutomationProperties.SetName(button, name);
+        button.Click += click;
         return button;
     }
 
-    private void FolderChip_Click(object sender, RoutedEventArgs e)
+    private void SelectFolder(int? folderId)
     {
-        _folderId = sender is Button { Tag: int id } ? id : null;
+        _folderId = folderId;
         ApplyFilter();
         RefreshCodes();
+    }
+
+    /// <summary>
+    /// Favorites pin first; chosen sort applies within favorite and non-favorite groups.
+    /// </summary>
+    private IEnumerable<Account> ApplySort(IEnumerable<Account> accounts)
+        => _sortMode switch
+        {
+            CodesSortMode.LatestFirst => accounts
+                .OrderByDescending(account => account.IsFavorite)
+                .ThenByDescending(account => account.CreatedAt)
+                .ThenBy(account => account.ServiceName, StringComparer.OrdinalIgnoreCase),
+            CodesSortMode.EarliestFirst => accounts
+                .OrderByDescending(account => account.IsFavorite)
+                .ThenBy(account => account.CreatedAt)
+                .ThenBy(account => account.ServiceName, StringComparer.OrdinalIgnoreCase),
+            CodesSortMode.ServiceDesc => accounts
+                .OrderByDescending(account => account.IsFavorite)
+                .ThenByDescending(account => account.ServiceName, StringComparer.OrdinalIgnoreCase)
+                .ThenByDescending(account => account.Username, StringComparer.OrdinalIgnoreCase),
+            CodesSortMode.AccountAsc => accounts
+                .OrderByDescending(account => account.IsFavorite)
+                .ThenBy(account => account.Username, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(account => account.ServiceName, StringComparer.OrdinalIgnoreCase),
+            CodesSortMode.AccountDesc => accounts
+                .OrderByDescending(account => account.IsFavorite)
+                .ThenByDescending(account => account.Username, StringComparer.OrdinalIgnoreCase)
+                .ThenByDescending(account => account.ServiceName, StringComparer.OrdinalIgnoreCase),
+            _ => accounts
+                .OrderByDescending(account => account.IsFavorite)
+                .ThenBy(account => account.ServiceName, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(account => account.Username, StringComparer.OrdinalIgnoreCase)
+        };
+
+    private void PersistUiPrefs()
+    {
+        var state = _uiPrefs.Load();
+        state.SortMode = _sortMode;
+        state.ViewMode = _viewMode;
+        state.ThemeMode = _themeMode;
+        _uiPrefs.Save(state);
+    }
+
+    private void OpenButtonMenu(Button button)
+    {
+        if (button.ContextMenu is null)
+            return;
+        button.ContextMenu.PlacementTarget = button;
+        button.ContextMenu.Placement = System.Windows.Controls.Primitives.PlacementMode.Bottom;
+        button.ContextMenu.IsOpen = true;
+    }
+
+    private void ViewModeButton_Click(object sender, RoutedEventArgs e)
+        => OpenButtonMenu(ViewModeButton);
+
+    private void SortButton_Click(object sender, RoutedEventArgs e)
+        => OpenButtonMenu(SortButton);
+
+    private void ViewModeMenu_Opened(object sender, RoutedEventArgs e)
+        => MarkCheckedMenuItems(sender, _viewMode.ToString());
+
+    private void SortMenu_Opened(object sender, RoutedEventArgs e)
+        => MarkCheckedMenuItems(sender, _sortMode.ToString());
+
+    private static void MarkCheckedMenuItems(object sender, string selectedTag)
+    {
+        if (sender is not ContextMenu menu)
+            return;
+        foreach (var item in menu.Items.OfType<MenuItem>())
+        {
+            var tag = item.Tag?.ToString();
+            item.IsCheckable = tag is not null;
+            item.IsChecked = string.Equals(tag, selectedTag, StringComparison.Ordinal);
+        }
+    }
+
+    private void ViewModeMenuItem_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not MenuItem { Tag: string tag }
+            || !Enum.TryParse<CodesViewMode>(tag, out var mode)
+            || mode == _viewMode)
+            return;
+
+        _viewMode = mode;
+        PersistUiPrefs();
+        ApplyViewMode();
+    }
+
+    private void SortMenuItem_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not MenuItem { Tag: string tag }
+            || !Enum.TryParse<CodesSortMode>(tag, out var mode)
+            || mode == _sortMode)
+            return;
+
+        _sortMode = mode;
+        PersistUiPrefs();
+        ApplyFilter();
+        RefreshCodes();
+    }
+
+    private void ApplyViewMode()
+    {
+        if (AccountList is null || ViewModeIcon is null)
+            return;
+
+        CloseOpenSlide();
+
+        var (templateKey, panelKey, glyph) = _viewMode switch
+        {
+            CodesViewMode.Large => ("LargeAccountTemplate", "ListAccountsPanel", "\uE8A5"),
+            CodesViewMode.Squares => ("SquareAccountTemplate", "SquareAccountsPanel", "\uE8A9"),
+            _ => ("CondensedAccountTemplate", "ListAccountsPanel", "\uE8C4")
+        };
+
+        AccountList.ItemTemplate = (DataTemplate)FindResource(templateKey);
+        AccountList.ItemsPanel = (ItemsPanelTemplate)FindResource(panelKey);
+        ViewModeIcon.Text = glyph;
+        ViewModeButton.ToolTip = _viewMode switch
+        {
+            CodesViewMode.Large => "View size: Large",
+            CodesViewMode.Squares => "View size: Squares",
+            _ => "View size: Condensed"
+        };
+    }
+
+    private void CopyAccountCode(AccountCardRow row)
+    {
+        if (_codesMasked)
+        {
+            ShowStatusToast("Move mouse or press a key to show codes");
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(row.RawCode))
+            return;
+
+        Clipboard.SetText(row.RawCode);
+        ShowStatusToast("Copied");
+    }
+
+    private void ApplyDisplayCode(AccountCardRow row)
+    {
+        if (string.IsNullOrWhiteSpace(row.RawCode))
+        {
+            row.DisplayCode = "------";
+            return;
+        }
+
+        row.DisplayCode = _codesMasked
+            ? new string('•', Math.Max(6, row.RawCode.Length))
+            : AccountEdits.FormatCode(row.RawCode);
+    }
+
+    private void ShowStatusToast(string message)
+    {
+        ToastText.Text = message;
+        _toastTimer.Stop();
+        StatusToast.Visibility = Visibility.Visible;
+        _toastTimer.Start();
+    }
+
+    private void HideStatusToast()
+    {
+        _toastTimer.Stop();
+        StatusToast.Visibility = Visibility.Collapsed;
+    }
+
+    private async void Favorite_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not FrameworkElement { Tag: AccountCardRow row })
+            return;
+
+        e.Handled = true;
+        CloseOpenSlide();
+
+        var next = !row.IsFavorite;
+        try
+        {
+            await _database.SetAccountFavoriteAsync(row.Id, next);
+            row.IsFavorite = next;
+            row.Account.IsFavorite = next;
+            var stored = _accounts.FirstOrDefault(account => account.Id == row.Id);
+            if (stored is not null)
+                stored.IsFavorite = next;
+
+            ApplyFilter();
+            RefreshCodes();
+            ShowStatusToast(next ? "Added to favorites" : "Removed from favorites");
+        }
+        catch (Exception ex)
+        {
+            LoggingConfiguration.LogException(ex, $"Failed to update favorite for account id {row.Id}.", nameof(CodesView));
+            MessageBox.Show(Window.GetWindow(this), ex.Message, "Favorite", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
     }
 
     private async void AddFolder_Click(object sender, RoutedEventArgs e)
@@ -210,15 +622,23 @@ public partial class CodesView : UserControl
             await ReloadAsync();
     }
 
-    private async void DeleteFolder_Click(object sender, RoutedEventArgs e)
+    private async void FolderEdit_Click(object sender, RoutedEventArgs e)
     {
-        if (_folderId is not int folderId)
+        if (sender is not Button { Tag: Folder folder })
             return;
 
-        var folder = _folders.FirstOrDefault(item => item.Id == folderId);
-        if (folder is null)
+        CloseOpenSlide();
+        var dialog = new FolderWindow(folder) { Owner = Window.GetWindow(this) };
+        if (dialog.ShowDialog() == true)
+            await ReloadAsync();
+    }
+
+    private async void FolderDelete_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not Button { Tag: Folder folder })
             return;
 
+        CloseOpenSlide();
         var confirm = MessageBox.Show(
             Window.GetWindow(this),
             $"Delete folder \"{folder.Name}\"? Accounts in it stay in All.",
@@ -230,13 +650,15 @@ public partial class CodesView : UserControl
 
         try
         {
-            await _database.DeleteFolderAsync(folderId);
-            _folderId = null;
+            await _database.DeleteFolderAsync(folder.Id);
+            if (_folderId == folder.Id)
+                _folderId = null;
             await ReloadAsync();
+            ShowStatusToast("Folder deleted");
         }
         catch (Exception ex)
         {
-            LoggingConfiguration.LogException(ex, $"Failed to delete folder id {folderId}.", nameof(CodesView));
+            LoggingConfiguration.LogException(ex, $"Failed to delete folder id {folder.Id}.", nameof(CodesView));
             MessageBox.Show(Window.GetWindow(this), ex.Message, "Delete folder", MessageBoxButton.OK, MessageBoxImage.Error);
         }
     }
@@ -248,62 +670,186 @@ public partial class CodesView : UserControl
             await ReloadAsync();
     }
 
-    private async void Card_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
+    private void SlideCopy_Click(object sender, RoutedEventArgs e)
     {
-        if (IsInsideButton(e.OriginalSource as DependencyObject))
-            return;
-        if (sender is not FrameworkElement { DataContext: AccountCardRow row })
+        if (sender is not Button { Tag: AccountCardRow row })
             return;
 
+        CloseOpenSlide();
+        CopyAccountCode(row);
+    }
+
+    private async void SlideEdit_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not Button { Tag: AccountCardRow row })
+            return;
+
+        CloseOpenSlide();
         var dialog = new AddAccountWindow(row.Account, row.Account.FolderId) { Owner = Window.GetWindow(this) };
         if (dialog.ShowDialog() == true)
             await ReloadAsync();
     }
 
-    private async void Star_Click(object sender, RoutedEventArgs e)
+    private async void SlideDelete_Click(object sender, RoutedEventArgs e)
     {
         if (sender is not Button { Tag: AccountCardRow row })
             return;
 
+        CloseOpenSlide();
+        var confirm = MessageBox.Show(
+            Window.GetWindow(this),
+            $"Delete \"{row.ServiceName}\"?",
+            "Delete account",
+            MessageBoxButton.YesNo,
+            MessageBoxImage.Question);
+        if (confirm != MessageBoxResult.Yes)
+            return;
+
         try
         {
-            var updated = AccountEdits.CopyScalars(row.Account);
-            updated.IsFavorite = !row.Account.IsFavorite;
-            await _database.UpdateAccountAsync(updated);
-            row.Account.IsFavorite = updated.IsFavorite;
-            row.IsFavorite = updated.IsFavorite;
-            ApplyFilter();
-            RefreshCodes();
+            await _database.DeleteAccountAsync(row.Id);
+            await ReloadAsync();
+            ShowStatusToast("Account deleted");
         }
         catch (Exception ex)
         {
-            LoggingConfiguration.LogException(ex, $"Failed to update favorite for account id {row.Id}.", nameof(CodesView));
-            MessageBox.Show(Window.GetWindow(this), ex.Message, "Favorite", MessageBoxButton.OK, MessageBoxImage.Error);
+            LoggingConfiguration.LogException(ex, $"Failed to delete account id {row.Id}.", nameof(CodesView));
+            MessageBox.Show(Window.GetWindow(this), ex.Message, "Delete account", MessageBoxButton.OK, MessageBoxImage.Error);
         }
     }
 
-    private void Copy_Click(object sender, RoutedEventArgs e)
+    private void AccountSlide_Loaded(object sender, RoutedEventArgs e)
     {
-        if (sender is not Button { Tag: AccountCardRow row } || string.IsNullOrWhiteSpace(row.RawCode))
+        if (sender is not Border border)
+            return;
+
+        // DataTemplate Freezables can be shared/frozen; give each row a mutable transform.
+        border.RenderTransform = new TranslateTransform();
+        border.Tag = new SlideTarget(SlideKind.Account, null, AccountActionWidth);
+    }
+
+    private void Slide_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        if (sender is not Border front)
+            return;
+
+        var transform = EnsureMutableTransform(front);
+        EnsureSlideTarget(front);
+        var width = front.Tag is SlideTarget target ? target.ActionWidth : AccountActionWidth;
+
+        if (!ReferenceEquals(_slideFront, front))
+            CloseOpenSlide();
+
+        _slideFront = front;
+        _slideTransform = transform;
+        _slideActionWidth = width;
+        _slideStart = e.GetPosition(this);
+        _slideOriginX = transform.X;
+        _slideMoved = false;
+        front.CaptureMouse();
+        e.Handled = true;
+    }
+
+    private static TranslateTransform EnsureMutableTransform(Border front)
+    {
+        if (front.RenderTransform is TranslateTransform { IsFrozen: false } existing)
+            return existing;
+
+        var transform = new TranslateTransform();
+        front.RenderTransform = transform;
+        return transform;
+    }
+
+    private static void EnsureSlideTarget(Border front)
+    {
+        if (front.Tag is SlideTarget)
+            return;
+        if (front.DataContext is AccountCardRow)
+            front.Tag = new SlideTarget(SlideKind.Account, null, AccountActionWidth);
+    }
+
+    private void Slide_MouseMove(object sender, MouseEventArgs e)
+    {
+        if (_slideFront is null || _slideTransform is null || e.LeftButton != MouseButtonState.Pressed)
+            return;
+        if (!ReferenceEquals(sender, _slideFront))
+            return;
+
+        var current = e.GetPosition(this);
+        var dx = current.X - _slideStart.X;
+        if (Math.Abs(dx) > 4)
+            _slideMoved = true;
+
+        _slideTransform.X = Math.Clamp(_slideOriginX + dx, -_slideActionWidth, 0);
+        e.Handled = true;
+    }
+
+    private void Slide_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
+    {
+        if (_slideFront is null || _slideTransform is null)
+            return;
+        if (!ReferenceEquals(sender, _slideFront))
+            return;
+
+        var front = _slideFront;
+        var transform = _slideTransform;
+        var moved = _slideMoved;
+        var width = _slideActionWidth;
+        var target = front.Tag as SlideTarget;
+
+        front.ReleaseMouseCapture();
+        e.Handled = true;
+
+        if (!moved)
         {
-            StatusText.Text = "That account has no code to copy.";
+            CloseOpenSlide();
+            if (target?.Kind == SlideKind.Folder)
+                SelectFolder(target.FolderId);
+            else if (target?.Kind == SlideKind.Account && front.DataContext is AccountCardRow row)
+                CopyAccountCode(row);
             return;
         }
 
-        Clipboard.SetText(row.RawCode);
-        StatusText.Text = $"Copied {row.ServiceName}.";
+        var open = transform.X <= -width * SlideOpenThreshold;
+        transform.X = open ? -width : 0;
+        if (!open)
+        {
+            _slideFront = null;
+            _slideTransform = null;
+        }
     }
 
-    private static bool IsInsideButton(DependencyObject? source)
+    private void Slide_LostMouseCapture(object sender, MouseEventArgs e)
     {
-        while (source is not null)
-        {
-            if (source is Button)
-                return true;
-            source = VisualTreeHelper.GetParent(source);
-        }
+        if (_slideFront is null || _slideTransform is null)
+            return;
+        if (!ReferenceEquals(sender, _slideFront))
+            return;
 
-        return false;
+        var open = _slideTransform.X <= -_slideActionWidth * SlideOpenThreshold;
+        _slideTransform.X = open ? -_slideActionWidth : 0;
+        if (!open)
+        {
+            _slideFront = null;
+            _slideTransform = null;
+        }
+    }
+
+    private void CloseOpenSlide()
+    {
+        if (_slideTransform is { IsFrozen: false })
+            _slideTransform.X = 0;
+        _slideFront = null;
+        _slideTransform = null;
+        _slideMoved = false;
+    }
+
+    private sealed record SlideTarget(SlideKind Kind, int? FolderId, double ActionWidth);
+
+    private enum SlideKind
+    {
+        Folder,
+        Account
     }
 }
 
@@ -326,11 +872,17 @@ public sealed class AccountCardRow : INotifyPropertyChanged
 
     public string RawCode { get; set; } = string.Empty;
 
-    private int _secondsRemaining;
-    public int SecondsRemaining
+    private double _secondsRemaining;
+    public double SecondsRemaining
     {
         get => _secondsRemaining;
-        set => Set(ref _secondsRemaining, value);
+        set
+        {
+            if (Math.Abs(_secondsRemaining - value) < 0.001)
+                return;
+            _secondsRemaining = value;
+            OnPropertyChanged(nameof(SecondsRemaining));
+        }
     }
 
     private bool _isFavorite;

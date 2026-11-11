@@ -37,6 +37,7 @@ public class SettingsService
                 SyncTimeWithInternet = false,
                 WindowDockPosition = "None",
                 IsWindowCollapsed = false,
+                WindowDockHandleOffsetY = 120,
                 WindowX = 100,
                 WindowY = 100,
                 WindowWidth = 778,
@@ -96,12 +97,16 @@ public class SettingsService
         await UpdateSettingsAsync(settings);
     }
 
-    public async Task SetWindowDockStateAsync(string dockPosition, bool isCollapsed)
+    public async Task SetWindowDockStateAsync(string dockPosition, bool isCollapsed, int? handleOffsetY = null)
     {
-        LoggingConfiguration.LogDebug($"Updating dock state to Position='{dockPosition}', IsCollapsed={isCollapsed}.", nameof(SettingsService));
+        LoggingConfiguration.LogDebug(
+            $"Updating dock state to Position='{dockPosition}', IsCollapsed={isCollapsed}, OffsetY={handleOffsetY?.ToString() ?? "(unchanged)"}.",
+            nameof(SettingsService));
         var settings = await GetSettingsAsync();
         settings.WindowDockPosition = dockPosition;
         settings.IsWindowCollapsed = isCollapsed;
+        if (handleOffsetY.HasValue)
+            settings.WindowDockHandleOffsetY = handleOffsetY.Value;
         await UpdateSettingsAsync(settings);
     }
 }

@@ -8,10 +8,10 @@
         MinWidth="420"
         WindowStartupLocation="CenterOwner"
         ShowInTaskbar="False"
-        Background="#F8F9FA"
+        Background="{DynamicResource PageBackgroundBrush}"
         FontFamily="Segoe UI"
         FontSize="14"
-        Foreground="#1F2937"
+        Foreground="{DynamicResource PrimaryTextBrush}"
         Loaded="Window_Loaded">
     <Grid>
         <Grid.RowDefinitions>

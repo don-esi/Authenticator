@@ -33,6 +33,11 @@ public class AppSettings
     public bool IsWindowCollapsed { get; set; }
 
     /// <summary>
+    /// Vertical offset (pixels from work-area top) for the dock edge handle
+    /// </summary>
+    public int WindowDockHandleOffsetY { get; set; }
+
+    /// <summary>
     /// Last window X position
     /// </summary>
     public int WindowX { get; set; }

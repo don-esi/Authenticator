@@ -1,0 +1,21 @@
+---
+description: Multi-chat phase workflow for Authenticator product roadmap
+alwaysApply: true
+---
+
+# Phase handoffs
+
+This repo is built **one phase per Agent chat**.
+
+- Roadmap index: `docs/phases/README.md`
+- Active phases: `docs/phases/A.md`, `B.md`, `C.md`, `E.md`, `F.md` (Phase **D removed** — no password vault)
+- Product north star: local-first WPF **2FA** authenticator — **no Google account requirement** (export import OK), **no password storage**.
+- Implementation lives under `Authenticator.Wpf` (WPF is source of truth; ignore stale WinUI wording in README unless updating it).
+
+When the user names a phase (A–C, E–F):
+
+1. Read that phase file and `docs/phases/README.md` first.
+2. Stay inside that phase’s slices and exit criteria.
+3. Do not start the next phase in the same chat unless the user explicitly expands scope.
+4. On completion, update the phase file Status and exit checkboxes.
+5. Never implement password-manager / `PasswordEntry` features.

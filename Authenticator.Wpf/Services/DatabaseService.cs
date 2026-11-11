@@ -14,6 +14,13 @@ namespace Authenticator.Services;
 /// </summary>
 public class DatabaseService
 {
+    private readonly ISecretProtector _secrets;
+
+    public DatabaseService(ISecretProtector? secrets = null)
+    {
+        _secrets = secrets ?? new SecretProtector();
+    }
+
     // Accounts
 
     public async Task<List<Account>> GetAllAccountsAsync(bool includeDeleted = false)
@@ -30,6 +37,9 @@ public class DatabaseService
             query = query.Where(a => !a.IsDeleted);
 
         var accounts = await query.OrderBy(a => a.ServiceName).ToListAsync();
+        foreach (var account in accounts)
+            RevealAccountSecrets(account);
+
         LoggingConfiguration.LogInfo($"Loaded {accounts.Count} account(s).", nameof(DatabaseService));
         return accounts;
     }
@@ -44,6 +54,9 @@ public class DatabaseService
             .Include(a => a.BackupCodes)
             .FirstOrDefaultAsync(a => a.Id == id);
 
+        if (account is not null)
+            RevealAccountSecrets(account);
+
         LoggingConfiguration.LogDebug(account is null ? $"Account {id} was not found." : $"Account {id} loaded.", nameof(DatabaseService));
         return account;
     }
@@ -55,8 +68,10 @@ public class DatabaseService
 
         using var context = new AuthenticatorDbContext();
         account.CreatedAt = DateTime.UtcNow;
+        SealAccountSecrets(account);
         context.Accounts.Add(account);
         await context.SaveChangesAsync();
+        RevealAccountSecrets(account);
 
         LoggingConfiguration.LogInfo($"Account added with id {account.Id}.", nameof(DatabaseService));
         return account;
@@ -69,10 +84,28 @@ public class DatabaseService
 
         using var context = new AuthenticatorDbContext();
         account.ModifiedAt = DateTime.UtcNow;
+        SealAccountSecrets(account);
         context.Accounts.Update(account);
         await context.SaveChangesAsync();
+        RevealAccountSecrets(account);
 
         LoggingConfiguration.LogDebug($"Account id {account.Id} updated.", nameof(DatabaseService));
+    }
+
+    public async Task SetAccountFavoriteAsync(int accountId, bool isFavorite)
+    {
+        LoggingConfiguration.LogInfo(
+            $"Setting favorite for account id {accountId} to {isFavorite}.",
+            nameof(DatabaseService));
+
+        using var context = new AuthenticatorDbContext();
+        var account = await context.Accounts.FirstOrDefaultAsync(a => a.Id == accountId && !a.IsDeleted);
+        if (account is null)
+            throw new InvalidOperationException($"Account id {accountId} was not found.");
+
+        account.IsFavorite = isFavorite;
+        account.ModifiedAt = DateTime.UtcNow;
+        await context.SaveChangesAsync();
     }
 
     public async Task MoveAccountToFolderAsync(int accountId, int? folderId)
@@ -294,6 +327,8 @@ public class DatabaseService
             query = query.Where(bc => !bc.IsUsed);
 
         var backupCodes = await query.OrderBy(bc => bc.CreatedAt).ToListAsync();
+        foreach (var backup in backupCodes)
+            RevealBackupSecret(backup);
         LoggingConfiguration.LogDebug($"Loaded {backupCodes.Count} backup code record(s) for account {accountId}.", nameof(DatabaseService));
         return backupCodes;
     }
@@ -309,7 +344,7 @@ public class DatabaseService
         var backupCodes = codeList.Select(code => new BackupCode
         {
             AccountId = accountId,
-            Code = code,
+            Code = SealValue(code),
             CreatedAt = DateTime.UtcNow
         }).ToList();
 
@@ -468,5 +503,44 @@ public class DatabaseService
         await context.SaveChangesAsync();
 
         LoggingConfiguration.LogInfo($"Trash emptied. Removed accounts={deletedAccounts.Count}, password entries={deletedPasswords.Count}.", nameof(DatabaseService));
+    }
+
+    private void RevealAccountSecrets(Account account)
+    {
+        account.SecretKey = RevealValue(account.SecretKey);
+        if (account.BackupCodes is null)
+            return;
+        foreach (var backup in account.BackupCodes)
+            RevealBackupSecret(backup);
+    }
+
+    private void RevealBackupSecret(BackupCode backup) =>
+        backup.Code = RevealValue(backup.Code);
+
+    private void SealAccountSecrets(Account account)
+    {
+        account.SecretKey = SealValue(account.SecretKey);
+        if (account.BackupCodes is null)
+            return;
+        foreach (var backup in account.BackupCodes)
+            backup.Code = SealValue(backup.Code);
+    }
+
+    private string SealValue(string value)
+    {
+        if (string.IsNullOrEmpty(value) || !VaultKeyService.Instance.IsUnlocked)
+            return value;
+        if (_secrets.IsEncrypted(value))
+            return value;
+        return _secrets.Protect(value);
+    }
+
+    private string RevealValue(string value)
+    {
+        if (string.IsNullOrEmpty(value) || !_secrets.IsEncrypted(value))
+            return value;
+        if (!VaultKeyService.Instance.IsUnlocked)
+            throw new InvalidOperationException("Vault is locked; encrypted secrets cannot be read.");
+        return _secrets.Unprotect(value);
     }
 }

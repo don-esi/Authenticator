@@ -229,7 +229,14 @@ public partial class AddAccountWindow : Window
 
     private void FillFromLink_Click(object sender, RoutedEventArgs e)
     {
-        var parsed = _qr.ParseOtpAuthUri(OtpAuthBox.Text.Trim());
+        var text = OtpAuthBox.Text.Trim();
+        if (GoogleMigrationParser.IsMigrationUri(text))
+        {
+            ErrorText.Text = "Google Authenticator transfer QRs belong in Settings → Export and Import.";
+            return;
+        }
+
+        var parsed = _qr.ParseOtpAuthUri(text);
         if (parsed is null)
         {
             ErrorText.Text = "Paste an otpauth://totp/ link.";
@@ -256,10 +263,23 @@ public partial class AddAccountWindow : Window
             using (var graphics = System.Drawing.Graphics.FromImage(bitmap))
                 graphics.DrawImage(source, 0, 0, source.Width, source.Height);
 
-            var parsed = _qr.DecodeQrCode(bitmap);
-            if (parsed is null)
+            var text = _qr.DecodeQrText(bitmap);
+            if (string.IsNullOrWhiteSpace(text))
             {
                 ErrorText.Text = "No QR code found in that image.";
+                return;
+            }
+
+            if (GoogleMigrationParser.IsMigrationUri(text))
+            {
+                ErrorText.Text = "Google Authenticator transfer QRs belong in Settings → Export and Import.";
+                return;
+            }
+
+            var parsed = _qr.ParseOtpAuthUri(text);
+            if (parsed is null)
+            {
+                ErrorText.Text = "No otpauth://totp QR code found in that image.";
                 return;
             }
 
@@ -304,7 +324,20 @@ public partial class AddAccountWindow : Window
                 return;
             }
 
-            var parsed = _qr.DecodeQrCode(bitmap);
+            var text = _qr.DecodeQrText(bitmap);
+            if (string.IsNullOrWhiteSpace(text))
+            {
+                ErrorText.Text = "No QR code found in that region.";
+                return;
+            }
+
+            if (GoogleMigrationParser.IsMigrationUri(text))
+            {
+                ErrorText.Text = "Google Authenticator transfer QRs belong in Settings → Export and Import.";
+                return;
+            }
+
+            var parsed = _qr.ParseOtpAuthUri(text);
             if (parsed is null)
             {
                 ErrorText.Text = "No otpauth://totp QR code found in that region.";

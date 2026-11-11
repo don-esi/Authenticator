@@ -88,6 +88,7 @@ public partial class AuthenticatorDbContext : DbContext
             SyncTimeWithInternet = false,
             WindowDockPosition = "None",
             IsWindowCollapsed = false,
+            WindowDockHandleOffsetY = 120,
             WindowX = 100,
             WindowY = 100,
             WindowWidth = 778,

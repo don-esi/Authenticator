@@ -13,9 +13,18 @@ namespace Authenticator.Services;
 public class QrCodeService
 {
     /// <summary>
-    /// Decodes a QR code from a bitmap image
+    /// Decodes a QR code from a bitmap image into an otpauth://totp account.
     /// </summary>
     public QrCodeResult? DecodeQrCode(Bitmap bitmap)
+    {
+        var text = DecodeQrText(bitmap);
+        return text is null ? null : ParseOtpAuthUri(text);
+    }
+
+    /// <summary>
+    /// Decodes raw QR text from a bitmap (otpauth, otpauth-migration, etc.).
+    /// </summary>
+    public string? DecodeQrText(Bitmap bitmap)
     {
         ArgumentNullException.ThrowIfNull(bitmap);
         LoggingConfiguration.LogDebug($"Decoding QR code from bitmap {bitmap.Width}x{bitmap.Height}.", nameof(QrCodeService));
@@ -37,7 +46,7 @@ public class QrCodeService
             if (result != null && !string.IsNullOrWhiteSpace(result.Text))
             {
                 LoggingConfiguration.LogInfo("QR code decoded successfully.", nameof(QrCodeService));
-                return ParseOtpAuthUri(result.Text);
+                return result.Text;
             }
         }
         catch (Exception ex)

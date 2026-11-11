@@ -19,7 +19,7 @@ public class BackupCode
     public Account? Account { get; set; }
 
     [Required]
-    [MaxLength(50)]
+    [MaxLength(512)]
     public string Code { get; set; } = string.Empty;
 
     /// <summary>
