@@ -2,7 +2,7 @@
 
 ## Build Setup.exe
 
-1. Install [Inno Setup 6.4+](https://jrsoftware.org/isinfo.php) (needs `DownloadTemporaryFile`).
+1. Install [Inno Setup 6.4+ / 7](https://jrsoftware.org/isinfo.php) (needs `DownloadTemporaryFile`). Per-user and Program Files installs are detected.
 2. From repo root:
 
 ```powershell

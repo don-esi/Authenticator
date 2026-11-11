@@ -42,13 +42,24 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 $iscc = @(
+    "$env:ProgramFiles\Inno Setup 7\ISCC.exe",
+    "${env:ProgramFiles(x86)}\Inno Setup 7\ISCC.exe",
+    "$env:LocalAppData\Programs\Inno Setup 7\ISCC.exe",
+    "$env:ProgramFiles\Inno Setup 6\ISCC.exe",
     "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe",
-    "$env:ProgramFiles\Inno Setup 6\ISCC.exe"
+    "$env:LocalAppData\Programs\Inno Setup 6\ISCC.exe"
 ) | Where-Object { Test-Path $_ } | Select-Object -First 1
 
 if (-not $iscc) {
-    throw "Inno Setup 6 (ISCC.exe) not found. Install from https://jrsoftware.org/isinfo.php"
+    $fromPath = Get-Command ISCC.exe -ErrorAction SilentlyContinue
+    if ($fromPath) { $iscc = $fromPath.Source }
 }
+
+if (-not $iscc) {
+    throw "Inno Setup (ISCC.exe) not found. Install Inno Setup 6+ from https://jrsoftware.org/isinfo.php"
+}
+
+Write-Host "Using ISCC: $iscc"
 
 New-Item -ItemType Directory -Force -Path $DistDir | Out-Null
 

@@ -1,5 +1,5 @@
 ; Authenticator Setup — elevated Inno installer with SQL Server Express bootstrap.
-; Compile via packaging\build-setup.ps1 (requires Inno Setup 6.4+ for DownloadTemporaryFile).
+; Compile via packaging\build-setup.ps1 (requires Inno Setup 6.4+ / 7 for DownloadTemporaryFile).
 
 #ifndef MyAppVersion
   #define MyAppVersion "1.0.0"
