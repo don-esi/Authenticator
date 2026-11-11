@@ -428,6 +428,14 @@
 						TextWrapping="Wrap" />
 				</StackPanel>
 			</Border>
+
+			<TextBlock
+				x:Name="AppVersionText"
+				Margin="0,8,0,0"
+				HorizontalAlignment="Center"
+				FontSize="12"
+				Foreground="{DynamicResource SecondaryTextBrush}"
+				Text="Authenticator" />
 		</StackPanel>
 	</ScrollViewer>
 </UserControl>

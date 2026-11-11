@@ -1,15 +1,15 @@
 /*
-    Authenticator schema for .\ZOGEXPRESS2025.
+    Optional admin/dev Authenticator schema for .\SQLEXPRESS (or your local instance).
 
+    Normal Setup installs do not need this script — the app creates the database on first run.
     Matches Data/Models and AuthenticatorDbContext.OnModelCreating.
     Id columns are INT IDENTITY.
-    SecretKey is NVARCHAR(MAX) and stores the base32 TOTP secret as plain text.
-    This pass does not encrypt SecretKey.
+    SecretKey is NVARCHAR(MAX); at runtime secrets are encrypted at rest when unlock is configured.
 
     No Accounts, Folders, BackupCodes, or PasswordEntries rows are seeded.
     One default AppSettings row is inserted to match HasData in OnModelCreating.
 
-    Run in SSMS or sqlcmd against .\ZOGEXPRESS2025. Do not point this file at another instance.
+    Run in SSMS or sqlcmd against .\SQLEXPRESS (or the Server in connection.json).
 */
 
 IF DB_ID(N'Authenticator') IS NULL

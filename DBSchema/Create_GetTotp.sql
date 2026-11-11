@@ -1,5 +1,5 @@
 /*
-    Deploy dbo.GetTotp (SQL CLR) to Authenticator on .\ZOGEXPRESS2025.
+    Optional: deploy dbo.GetTotp (SQL CLR) to Authenticator on .\SQLEXPRESS (or your connection.json Server).
 
     Enables CLR. Trusts the signed assemblies with clr strict security ON.
     Does not set TRUSTWORTHY ON. Does not disable clr strict security.
@@ -21,7 +21,7 @@
       DROP ASYMMETRIC KEY AuthenticatorSqlClrKey;
 
     Do not run this file from the app. Review, then SSMS or:
-      sqlcmd -S .\ZOGEXPRESS2025 -E -i D:\source\Authenticator\DBSchema\Create_GetTotp.sql
+      sqlcmd -S .\SQLEXPRESS -E -i D:\source\Authenticator\DBSchema\Create_GetTotp.sql
 */
 
 USE master;

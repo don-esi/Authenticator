@@ -40,7 +40,7 @@ Order: **C1 → C2 → C3**.
 
 ## Key / unlock assumptions
 
-- **Storage:** SQL Server (`Authenticator` on `.\ZOGEXPRESS2025`), not SQLite. Secrets live in `Account.SecretKey` and `BackupCode.Code` as AES-GCM ciphertext with prefix `v1:` when an unlock method is configured.
+- **Storage:** SQL Server (`Authenticator` on `.\SQLEXPRESS` by default; override via `%LocalAppData%\Authenticator\connection.json`), not SQLite. Secrets live in `Account.SecretKey` and `BackupCode.Code` as AES-GCM ciphertext with prefix `v1:` when an unlock method is configured.
 - **DEK:** 32-byte random data-encryption key. Present in memory only while unlocked (`VaultKeyService`). Cleared on full lock — not on idle mask.
 - **Wraps:** Each unlock method stores an AES-GCM wrap of the same DEK inside DPAPI-protected `%LocalAppData%\Authenticator\lock-credentials.bin`.
   - **PIN:** PBKDF2-SHA256 (100k) → KEK → unwrap-as-verify.

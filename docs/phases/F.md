@@ -1,6 +1,6 @@
 # Phase F — Ship
 
-**Status:** Not started  
+**Status:** Done  
 **Depends on:** Phases A–C and E far enough that the packaged build is what you actually want people to run  
 
 **Next phase:** none (maintenance)
@@ -13,24 +13,26 @@ Someone else can install and use the app without you.
 
 | ID | Outcome |
 |----|---------|
-| **F1** Installer | MSIX and/or Setup.exe; clean `%LocalAppData%\Authenticator` layout |
-| **F2** Update path | Versioning, changelog, sideload or Store update story |
-| **F3** First-run | PIN/Hello setup, optional import (B1), privacy defaults — **no Google login** |
+| **F1** Installer | Inno Setup `Setup.exe`; self-contained win-x64; detects `.\SQLEXPRESS` and installs **SQL Server Express** when missing; writes `%LocalAppData%\Authenticator\connection.json`; app under Program Files |
+| **F2** Update path | Versioning in csproj + Settings; `CHANGELOG.md`; sideload = run newer Setup |
+| **F3** First-run | PIN/Hello required; optional JSON / Google Authenticator *export* import — **no Google login** |
 
 Order: **F1 → F2 → F3**.
 
 ## Key files
 
-- Packaging projects / publish profiles (create as needed)
-- `App.xaml.cs` first-run gating
+- `packaging/Authenticator.iss`, `packaging/build-setup.ps1`
+- `Authenticator.Wpf/Data/ConnectionConfig.cs`, `AuthenticatorDbContext.cs`
+- `Authenticator.Wpf/FirstRunWindow.xaml(.cs)`
+- `App.xaml.cs` / `MainWindow.xaml.cs` first-run gating
 - `docs/phases/README.md` + README.md accuracy (WPF, not stale WinUI claims)
 
 ## Exit criteria
 
-- [ ] Fresh machine install works
-- [ ] Version visible in UI or about/settings
-- [ ] First-run sets unlock method and offers import without Google account
-- [ ] README matches the shipped product
+- [x] Fresh machine install works (Setup + Express bootstrap + self-contained publish)
+- [x] Version visible in UI or about/settings
+- [x] First-run sets unlock method and offers import without Google account
+- [x] README matches the shipped product
 
 ## Starter prompt (paste into new chat)
 

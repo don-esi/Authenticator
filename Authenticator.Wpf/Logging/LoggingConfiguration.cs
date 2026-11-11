@@ -26,7 +26,11 @@ public static class LoggingConfiguration
             if (_isInitialized || _isShuttingDown)
                 return;
 
-            var logDirectory = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "logs");
+            // Prefer LocalAppData so Program Files installs remain writable.
+            var logDirectory = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "Authenticator",
+                "logs");
             Directory.CreateDirectory(logDirectory);
 
             _logFilePath = Path.Combine(logDirectory, "log-.txt");

@@ -1,0 +1,4 @@
+{
+  "Server": ".\\SQLEXPRESS",
+  "Database": "Authenticator"
+}

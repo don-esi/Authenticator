@@ -28,4 +28,5 @@ Within a phase, implement slices in the order listed (A1→A2→…). Prefer **o
 - Lock overlay: PIN and/or YubiKey (OTP wedge), Windows Hello (Phase C)
 - Settings: auto-lock, import/export JSON, Google Authenticator migration import
 - Secret encryption at rest while unlock methods are configured (Phase C)
-- Stack: **WPF** under `Authenticator.Wpf` (README still mentions WinUI in places — treat WPF as source of truth)
+- Stack: **WPF** under `Authenticator.Wpf`
+- Ship: Inno Setup + SQL Express (`.\SQLEXPRESS`) bootstrap, first-run unlock, version in Settings (Phase F)

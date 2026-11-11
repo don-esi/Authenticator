@@ -150,15 +150,13 @@ public partial class MainWindow : Window
 
         if (_hasUnlockMethod)
             Lock();
-        else
-        {
-            PageHost.Visibility = Visibility.Visible;
-            ShowPage(CodesPage);
-        }
+        // else: keep PageHost collapsed until first-run wizard completes
 
+        var databaseReady = false;
         try
         {
             await DatabaseInitializer.InitializeDatabaseAsync();
+            databaseReady = true;
             var settings = await _settings.GetSettingsAsync();
             _timeoutSeconds = settings.AutoLockTimeout;
             if (!_hasUnlockMethod && _timeoutSeconds > 0)
@@ -181,9 +179,49 @@ public partial class MainWindow : Window
         catch (Exception ex)
         {
             LoggingConfiguration.LogException(ex, "Failed to load auto-lock / dock settings.", nameof(MainWindow));
+            MessageBox.Show(
+                this,
+                $"Could not connect to SQL Server ({ConnectionConfig.Server}, database {ConnectionConfig.Database}).\n\n" +
+                "Install SQL Server Express with the SQLEXPRESS instance, or set Server/Database in:\n" +
+                $"{ConnectionConfig.ConfigPath}\n\n{ex.Message}",
+                "Authenticator — database unavailable",
+                MessageBoxButton.OK,
+                MessageBoxImage.Error);
         }
 
+        if (databaseReady && !_hasUnlockMethod)
+            await RunFirstRunWizardAsync();
+
         _lockTimer.Start();
+    }
+
+    private async Task RunFirstRunWizardAsync()
+    {
+        var wizard = new FirstRunWindow { Owner = this };
+        var completed = wizard.ShowDialog() == true;
+        RefreshUnlockCapabilities();
+        ConfigureLockOverlay();
+
+        if (!completed || !_hasUnlockMethod)
+        {
+            MessageBox.Show(
+                this,
+                "Authenticator needs a PIN or Windows Hello before you can use codes. Opening Settings.",
+                "Setup required",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
+            PageHost.Visibility = Visibility.Visible;
+            ShowPage(SettingsPage);
+            await SettingsPage.ReloadAsync();
+            return;
+        }
+
+        if (VaultKeyService.Instance.IsUnlocked)
+            VaultKeyService.Instance.Clear();
+
+        PageHost.Visibility = Visibility.Visible;
+        Lock();
+        await CodesPage.ReloadAsync();
     }
 
     private void Window_Closing(object sender, System.ComponentModel.CancelEventArgs e)

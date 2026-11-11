@@ -16,18 +16,18 @@ public partial class AuthenticatorDbContext : DbContext
     public DbSet<AppSettings> AppSettings { get; set; } = null!;
 
     /// <summary>
-    /// Existing Authenticator database on .\ZOGEXPRESS2025.
-    /// Startup must not create, migrate, or alter tables.
+    /// SQL connection from %LocalAppData%\Authenticator\connection.json, else .\SQLEXPRESS.
     /// </summary>
-    public const string ConnectionString =
-        "Server=.\\ZOGEXPRESS2025;Database=Authenticator;Trusted_Connection=True;TrustServerCertificate=True";
+    public static string ConnectionString => ConnectionConfig.ConnectionString;
 
     protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
     {
         if (!optionsBuilder.IsConfigured)
         {
             optionsBuilder.UseSqlServer(ConnectionString);
-            LoggingConfiguration.LogDebug("DbContext configured for SQL Server .\\ZOGEXPRESS2025, database Authenticator.", nameof(AuthenticatorDbContext));
+            LoggingConfiguration.LogDebug(
+                $"DbContext configured for SQL Server {ConnectionConfig.Server}, database {ConnectionConfig.Database}.",
+                nameof(AuthenticatorDbContext));
         }
         else
         {
