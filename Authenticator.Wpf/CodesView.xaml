@@ -246,13 +246,34 @@
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
 
-        <TextBlock Grid.Row="0"
-                   Text="2FA Codes"
-                   FontSize="22"
-                   FontWeight="SemiBold"
-                   Foreground="{DynamicResource PrimaryTextBrush}"
-                   HorizontalAlignment="Center"
-                   Margin="0,4,0,10" />
+        <Grid Grid.Row="0" Margin="0,4,0,10" MinHeight="32">
+            <TextBlock x:Name="MainTitle"
+                       Text="2FA Codes"
+                       FontSize="22"
+                       FontWeight="SemiBold"
+                       Foreground="{DynamicResource PrimaryTextBrush}"
+                       HorizontalAlignment="Left"
+                       VerticalAlignment="Center" />
+            <Grid x:Name="FolderHeader" Visibility="Collapsed">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <Button Style="{StaticResource TextActionButton}"
+                        Content="Back"
+                        Click="FolderBack_Click"
+                        VerticalAlignment="Center"
+                        Margin="0,0,8,0"
+                        AutomationProperties.Name="Back to all codes" />
+                <TextBlock x:Name="FolderTitle"
+                           Grid.Column="1"
+                           FontSize="22"
+                           FontWeight="SemiBold"
+                           Foreground="{DynamicResource PrimaryTextBrush}"
+                           VerticalAlignment="Center"
+                           TextTrimming="CharacterEllipsis" />
+            </Grid>
+        </Grid>
 
         <Grid Grid.Row="1" Margin="0,0,0,8">
             <Grid.ColumnDefinitions>
@@ -277,7 +298,8 @@
                 </Grid>
             </Border>
             <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
-                <Button Margin="6,0,0,0"
+                <Button x:Name="AddFolderButton"
+                        Margin="6,0,0,0"
                         Style="{StaticResource IconButton}"
                         ToolTip="Add folder"
                         AutomationProperties.Name="Add folder"
@@ -327,31 +349,36 @@
             </StackPanel>
         </Grid>
 
-        <Grid Grid.Row="2">
-            <ScrollViewer VerticalScrollBarVisibility="Auto">
-                <StackPanel>
-                    <StackPanel x:Name="ChipPanel" Margin="0,0,0,4" />
-                    <ItemsControl x:Name="AccountList"
-                                  ItemTemplate="{StaticResource CondensedAccountTemplate}"
-                                  ItemsPanel="{StaticResource ListAccountsPanel}" />
+        <Grid Grid.Row="2" x:Name="ContentHost" ClipToBounds="True">
+            <Grid x:Name="CodesPane">
+                <Grid.RenderTransform>
+                    <TranslateTransform x:Name="CodesPaneTransform" X="0" />
+                </Grid.RenderTransform>
+                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                    <StackPanel>
+                        <StackPanel x:Name="ChipPanel" Margin="0,0,0,4" />
+                        <ItemsControl x:Name="AccountList"
+                                      ItemTemplate="{StaticResource CondensedAccountTemplate}"
+                                      ItemsPanel="{StaticResource ListAccountsPanel}" />
+                    </StackPanel>
+                </ScrollViewer>
+                <StackPanel x:Name="EmptyPanel"
+                            HorizontalAlignment="Center"
+                            VerticalAlignment="Center"
+                            Visibility="Collapsed">
+                    <TextBlock x:Name="EmptyText"
+                               Text="No accounts yet."
+                               HorizontalAlignment="Center"
+                               Foreground="{DynamicResource SecondaryTextBrush}"
+                               FontSize="15" />
+                    <TextBlock x:Name="EmptyHint"
+                               Margin="0,6,0,0"
+                               HorizontalAlignment="Center"
+                               Foreground="{DynamicResource SecondaryTextBrush}"
+                               FontSize="13"
+                               Text="Tap + to add an account" />
                 </StackPanel>
-            </ScrollViewer>
-            <StackPanel x:Name="EmptyPanel"
-                        HorizontalAlignment="Center"
-                        VerticalAlignment="Center"
-                        Visibility="Collapsed">
-                <TextBlock x:Name="EmptyText"
-                           Text="No accounts yet."
-                           HorizontalAlignment="Center"
-                           Foreground="{DynamicResource SecondaryTextBrush}"
-                           FontSize="15" />
-                <TextBlock x:Name="EmptyHint"
-                           Margin="0,6,0,0"
-                           HorizontalAlignment="Center"
-                           Foreground="{DynamicResource SecondaryTextBrush}"
-                           FontSize="13"
-                           Text="Tap + to add an account" />
-            </StackPanel>
+            </Grid>
             <Button HorizontalAlignment="Right"
                     VerticalAlignment="Bottom"
                     Margin="0,0,4,10"

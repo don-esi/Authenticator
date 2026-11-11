@@ -6,6 +6,7 @@ using System.Windows.Automation;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Media.Animation;
 using System.Windows.Threading;
 using Authenticator.Data.Models;
 using Authenticator.Logging;
@@ -205,12 +206,22 @@ public partial class CodesView : UserControl
             return;
 
         CloseOpenSlide();
+        UpdateFolderChrome();
 
         var query = SearchBox.Text.Trim();
         var filtered = _accounts.Where(account =>
         {
-            if (_folderId is int folderId && account.FolderId != folderId)
+            if (_folderId is int folderId)
+            {
+                if (account.FolderId != folderId)
+                    return false;
+            }
+            else if (account.FolderId is not null)
+            {
+                // Main page: only accounts that are not already in a folder.
                 return false;
+            }
+
             if (query.Length == 0)
                 return true;
             return account.ServiceName.Contains(query, StringComparison.OrdinalIgnoreCase)
@@ -223,59 +234,57 @@ public partial class CodesView : UserControl
         foreach (var account in filtered)
             _rows.Add(AccountCardRow.From(account));
 
-        var noFilters = query.Length == 0 && _folderId is null;
-        var emptyAll = _accounts.Count == 0 && noFilters;
+        var noSearch = query.Length == 0;
+        var emptyAll = _accounts.Count == 0 && _folderId is null && noSearch;
         EmptyText.Text = emptyAll
             ? "No accounts yet."
-            : _folderId is not null && query.Length == 0
+            : _folderId is not null && noSearch
                 ? "No accounts in this folder."
-                : "No matching accounts.";
-        EmptyHint.Text = emptyAll ? "Tap + to add an account" : "Try another search or folder";
+                : _folderId is null && noSearch
+                    ? "No unfiled accounts."
+                    : "No matching accounts.";
+        EmptyHint.Text = emptyAll
+            ? "Tap + to add an account"
+            : _folderId is null && noSearch
+                ? "Accounts in folders stay inside those folders"
+                : "Try another search or folder";
         EmptyHint.Visibility = Visibility.Visible;
         EmptyPanel.Visibility = _rows.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
         BuildChips();
     }
 
+    private void UpdateFolderChrome()
+    {
+        if (MainTitle is null || FolderHeader is null || FolderTitle is null || ChipPanel is null || AddFolderButton is null)
+            return;
+
+        var inFolder = _folderId is not null;
+        var folder = inFolder ? _folders.FirstOrDefault(item => item.Id == _folderId) : null;
+
+        MainTitle.Visibility = inFolder ? Visibility.Collapsed : Visibility.Visible;
+        FolderHeader.Visibility = inFolder ? Visibility.Visible : Visibility.Collapsed;
+        FolderTitle.Text = folder?.Name ?? "Folder";
+        ChipPanel.Visibility = inFolder ? Visibility.Collapsed : Visibility.Visible;
+        AddFolderButton.Visibility = inFolder ? Visibility.Collapsed : Visibility.Visible;
+    }
+
     private void BuildChips()
     {
         ChipPanel.Children.Clear();
-        ChipPanel.Children.Add(MakeFolderRow("All", _accounts.Count, _folderId is null, folder: null));
+        if (_folderId is not null)
+            return;
+
         foreach (var folder in _folders.OrderBy(folder => folder.Name, StringComparer.OrdinalIgnoreCase))
         {
             var count = _accounts.Count(account => account.FolderId == folder.Id);
-            ChipPanel.Children.Add(MakeFolderRow(folder.Name, count, _folderId == folder.Id, folder));
+            ChipPanel.Children.Add(MakeFolderRow(folder.Name, count, folder));
         }
     }
 
-    private FrameworkElement MakeFolderRow(string label, int count, bool selected, Folder? folder)
+    private FrameworkElement MakeFolderRow(string label, int count, Folder folder)
     {
-        var background = selected
-            ? "#0078D4"
-            : string.IsNullOrWhiteSpace(folder?.Color) ? null : folder!.Color;
-        var foreground = selected ? "#FFFFFF" : null;
-        var muted = selected ? "#E5F1FB" : null;
-        var content = BuildFolderContent(label, count, foreground, muted, selected);
-
-        if (folder is null)
-        {
-            var allButton = new Button
-            {
-                Content = content,
-                Margin = new Thickness(0, 0, 0, 6),
-                Padding = new Thickness(12, 8, 12, 8),
-                HorizontalContentAlignment = HorizontalAlignment.Stretch,
-                HorizontalAlignment = HorizontalAlignment.Stretch,
-                Background = selected
-                    ? AccountEdits.BrushFromHex("#0078D4")
-                    : (Brush)FindResource("ChipIdleBrush"),
-                BorderThickness = new Thickness(0),
-                Cursor = Cursors.Hand,
-                Style = (Style)FindResource("ChipButton")
-            };
-            AutomationProperties.SetName(allButton, label);
-            allButton.Click += (_, _) => SelectFolder(null);
-            return allButton;
-        }
+        var background = string.IsNullOrWhiteSpace(folder.Color) ? null : folder.Color;
+        var content = BuildFolderContent(label, count);
 
         var host = new Grid
         {
@@ -318,14 +327,10 @@ public partial class CodesView : UserControl
         return host;
     }
 
-    private Grid BuildFolderContent(string label, int count, string? foreground, string? muted, bool selected)
+    private Grid BuildFolderContent(string label, int count)
     {
-        var fgBrush = foreground is null
-            ? (Brush)FindResource(selected ? "PrimaryTextBrush" : "ChipIdleTextBrush")
-            : AccountEdits.BrushFromHex(foreground);
-        var mutedBrush = muted is null
-            ? (Brush)FindResource(selected ? "SecondaryTextBrush" : "ChipIdleMutedBrush")
-            : AccountEdits.BrushFromHex(muted);
+        var fgBrush = (Brush)FindResource("ChipIdleTextBrush");
+        var mutedBrush = (Brush)FindResource("ChipIdleMutedBrush");
 
         var content = new Grid();
         content.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
@@ -366,7 +371,7 @@ public partial class CodesView : UserControl
         meta.Children.Add(new TextBlock
         {
             FontFamily = new FontFamily("Segoe MDL2 Assets"),
-            Text = "\uE192",
+            Text = "\uE76C",
             FontSize = 12,
             Foreground = mutedBrush,
             VerticalAlignment = VerticalAlignment.Center
@@ -413,11 +418,47 @@ public partial class CodesView : UserControl
         return button;
     }
 
-    private void SelectFolder(int? folderId)
+    private void SelectFolder(int? folderId, bool animate = true)
     {
+        if (_folderId == folderId)
+            return;
+
+        var entering = folderId is not null && _folderId is null;
+        var leaving = folderId is null && _folderId is not null;
         _folderId = folderId;
+
+        if (animate && (entering || leaving) && CodesPaneTransform is not null && ContentHost is not null)
+        {
+            AnimateFolderPane(forward: entering, after: () =>
+            {
+                ApplyFilter();
+                RefreshCodes();
+            });
+            return;
+        }
+
         ApplyFilter();
         RefreshCodes();
+    }
+
+    private void FolderBack_Click(object sender, RoutedEventArgs e)
+        => SelectFolder(null);
+
+    private void AnimateFolderPane(bool forward, Action after)
+    {
+        var width = Math.Max(ContentHost.ActualWidth, 1);
+        // Enter folder: slide in from the right. Leave: slide in from the left.
+        var from = forward ? width : -width * 0.45;
+
+        CodesPaneTransform.BeginAnimation(TranslateTransform.XProperty, null);
+        CodesPaneTransform.X = from;
+        after();
+
+        var enter = new DoubleAnimation(from, 0, TimeSpan.FromMilliseconds(240))
+        {
+            EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseOut }
+        };
+        CodesPaneTransform.BeginAnimation(TranslateTransform.XProperty, enter);
     }
 
     /// <summary>
@@ -641,7 +682,7 @@ public partial class CodesView : UserControl
         CloseOpenSlide();
         var confirm = MessageBox.Show(
             Window.GetWindow(this),
-            $"Delete folder \"{folder.Name}\"? Accounts in it stay in All.",
+            $"Delete folder \"{folder.Name}\"? Accounts in it return to the main list.",
             "Delete folder",
             MessageBoxButton.YesNo,
             MessageBoxImage.Question);

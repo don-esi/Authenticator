@@ -12,14 +12,14 @@
                        FontSize="28"
                        FontWeight="SemiBold"
                        Foreground="{DynamicResource PrimaryTextBrush}"
-                       HorizontalAlignment="Center"
+                       HorizontalAlignment="Left"
                        Margin="0,8,0,16" />
             <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
                 <StackPanel>
                     <TextBlock x:Name="EmptyText"
                                Text="No accounts have backup codes."
                                Foreground="{DynamicResource SecondaryTextBrush}"
-                               HorizontalAlignment="Center"
+                               HorizontalAlignment="Left"
                                Margin="0,40,0,0"
                                Visibility="Collapsed" />
                     <ItemsControl x:Name="AccountList">
