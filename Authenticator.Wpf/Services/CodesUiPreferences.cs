@@ -43,6 +43,9 @@ public sealed class CodesUiPreferencesState
     /// <summary>Keep the main window topmost while docked and expanded.</summary>
     public bool AlwaysOnTopWhenDocked { get; set; } = true;
 
+    /// <summary>When docked, keep expanded (no auto-collapse on focus/mouse leave).</summary>
+    public bool DockPinned { get; set; }
+
     /// <summary>Dock edge handle fill color (hex, e.g. #E53935).</summary>
     public string DockHandleColor { get; set; } = "#E53935";
 

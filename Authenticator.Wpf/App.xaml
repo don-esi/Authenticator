@@ -67,6 +67,30 @@
             </Setter>
         </Style>
 
+        <Style x:Key="SecondaryToggleButton" TargetType="ToggleButton">
+            <Setter Property="Foreground" Value="{DynamicResource PrimaryTextBrush}" />
+            <Setter Property="Background" Value="{DynamicResource SecondaryBackgroundBrush}" />
+            <Setter Property="Padding" Value="14,8" />
+            <Setter Property="FontSize" Value="14" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ToggleButton">
+                        <Border x:Name="Chrome" Background="{TemplateBinding Background}" CornerRadius="10" Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="Chrome" Property="Background" Value="{DynamicResource ChipIdleBrush}" />
+                                <Setter Property="Foreground" Value="{DynamicResource BrandBlueBrush}" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
         <Style x:Key="TextActionButton" TargetType="Button">
             <Setter Property="Foreground" Value="{DynamicResource BrandBlueBrush}" />
             <Setter Property="Background" Value="Transparent" />

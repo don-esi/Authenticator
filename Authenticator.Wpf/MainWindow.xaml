@@ -103,22 +103,43 @@
 							Text="Settings" />
 					</StackPanel>
 				</Button>
-				<Button
-					x:Name="CollapseDockButton"
+				<StackPanel
 					Grid.Column="3"
-					Margin="4,0,0,0"
-					Padding="10,4"
-					VerticalAlignment="Center"
-					AutomationProperties.Name="Collapse to dock"
-					Click="CollapseDock_Click"
-					Style="{StaticResource SecondaryButton}"
-					ToolTip="Collapse to edge handle"
-					Visibility="Collapsed">
-					<TextBlock
-						FontFamily="Segoe MDL2 Assets"
-						FontSize="16"
-						Text="&#xE76C;" />
-				</Button>
+					Orientation="Horizontal"
+					VerticalAlignment="Center">
+					<ToggleButton
+						x:Name="PinDockButton"
+						Margin="4,0,0,0"
+						Padding="10,4"
+						VerticalAlignment="Center"
+						AutomationProperties.Name="Pin window open"
+						Checked="PinDock_Changed"
+						Unchecked="PinDock_Changed"
+						Style="{StaticResource SecondaryToggleButton}"
+						ToolTip="Keep open (do not auto-collapse)"
+						Visibility="Collapsed">
+						<TextBlock
+							x:Name="PinDockIcon"
+							FontFamily="Segoe MDL2 Assets"
+							FontSize="16"
+							Text="&#xE718;" />
+					</ToggleButton>
+					<Button
+						x:Name="CollapseDockButton"
+						Margin="4,0,0,0"
+						Padding="10,4"
+						VerticalAlignment="Center"
+						AutomationProperties.Name="Collapse to dock"
+						Click="CollapseDock_Click"
+						Style="{StaticResource SecondaryButton}"
+						ToolTip="Collapse to edge handle"
+						Visibility="Collapsed">
+						<TextBlock
+							FontFamily="Segoe MDL2 Assets"
+							FontSize="16"
+							Text="&#xE76C;" />
+					</Button>
+				</StackPanel>
 			</Grid>
 		</Border>
 

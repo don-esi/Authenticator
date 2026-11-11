@@ -33,6 +33,7 @@ public partial class MainWindow : Window
     private bool _isCollapsed;
     private int _handleOffsetY = 120;
     private bool _alwaysOnTopWhenDocked = true;
+    private bool _dockPinned;
     private bool _minimizeToTray = true;
     private bool _forceClose;
     private bool _dockAnimating;
@@ -85,8 +86,8 @@ public partial class MainWindow : Window
         };
         _dockAutoHide = new DockAutoHideService(
             this,
-            shouldWatch: () => IsDocked && !_isCollapsed && !_forceClose && IsVisible,
-            canCollapse: () => !_dockAnimating && _suppressDockAutoHide == 0 && IsDocked && !_isCollapsed,
+            shouldWatch: () => IsDocked && !_isCollapsed && !_forceClose && !_dockPinned && IsVisible,
+            canCollapse: () => !_dockAnimating && !_dockPinned && _suppressDockAutoHide == 0 && IsDocked && !_isCollapsed,
             collapseAsync: () => CollapseToDockAsync());
         SourceInitialized += (_, _) =>
         {
@@ -230,7 +231,7 @@ public partial class MainWindow : Window
             return;
 
         e.Cancel = true;
-        if (IsDocked)
+        if (IsDocked && !_dockPinned)
         {
             _ = CollapseToDockAsync();
             return;
@@ -294,10 +295,10 @@ public partial class MainWindow : Window
 
     private void RequestDockAutoHide(string reason)
     {
-        if (!IsDocked || _isCollapsed || _dockAnimating || _forceClose || _suppressDockAutoHide > 0 || !IsVisible)
+        if (!IsDocked || _isCollapsed || _dockAnimating || _forceClose || _dockPinned || _suppressDockAutoHide > 0 || !IsVisible)
         {
             LoggingConfiguration.LogInfo(
-                $"Dock auto-hide skipped ({reason}): docked={IsDocked} collapsed={_isCollapsed} animating={_dockAnimating} forceClose={_forceClose} suppress={_suppressDockAutoHide} visible={IsVisible} pos={_dockPosition}",
+                $"Dock auto-hide skipped ({reason}): docked={IsDocked} collapsed={_isCollapsed} animating={_dockAnimating} forceClose={_forceClose} pinned={_dockPinned} suppress={_suppressDockAutoHide} visible={IsVisible} pos={_dockPosition}",
                 nameof(MainWindow));
             return;
         }
@@ -318,8 +319,16 @@ public partial class MainWindow : Window
 
     private void CollapseDock_Click(object sender, RoutedEventArgs e)
     {
-        if (IsDocked)
+        if (IsDocked && !_dockPinned)
             _ = CollapseToDockAsync();
+    }
+
+    private void PinDock_Changed(object sender, RoutedEventArgs e)
+    {
+        _dockPinned = PinDockButton.IsChecked == true;
+        UpdatePinDockUi();
+        PersistDockPinned();
+        UpdateDockAutoHideWatch();
     }
 
     /// <summary>Called from Settings when the user picks Off / Left / Right.</summary>
@@ -354,7 +363,27 @@ public partial class MainWindow : Window
         var prefs = _uiPrefs.Load();
         _minimizeToTray = prefs.MinimizeToTray;
         _alwaysOnTopWhenDocked = prefs.AlwaysOnTopWhenDocked;
+        _dockPinned = prefs.DockPinned;
+        PinDockButton.IsChecked = _dockPinned;
+        UpdatePinDockUi();
         ApplyDockHandleAppearance(prefs);
+    }
+
+    private void PersistDockPinned()
+    {
+        var prefs = _uiPrefs.Load();
+        prefs.DockPinned = _dockPinned;
+        _uiPrefs.Save(prefs);
+    }
+
+    private void UpdatePinDockUi()
+    {
+        PinDockIcon.Text = _dockPinned ? "\uE77A" : "\uE718";
+        PinDockButton.ToolTip = _dockPinned
+            ? "Unpin (allow auto-collapse)"
+            : "Keep open (do not auto-collapse)";
+        CollapseDockButton.IsEnabled = !_dockPinned;
+        CollapseDockButton.Opacity = _dockPinned ? 0.45 : 1;
     }
 
     private void ApplyDockHandleAppearance(CodesUiPreferencesState? prefs = null)
@@ -370,7 +399,10 @@ public partial class MainWindow : Window
 
     private void UpdateCollapseButton()
     {
-        CollapseDockButton.Visibility = IsDocked ? Visibility.Visible : Visibility.Collapsed;
+        var docked = IsDocked ? Visibility.Visible : Visibility.Collapsed;
+        CollapseDockButton.Visibility = docked;
+        PinDockButton.Visibility = docked;
+        UpdatePinDockUi();
     }
 
     private Rect GetDockWorkArea()
