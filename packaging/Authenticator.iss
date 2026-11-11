@@ -56,6 +56,21 @@ const
     'https://download.microsoft.com/download/3/8/d/38de7036-2433-4207-8eae-06e247e17b25/SQLEXPR_x64_ENU.exe';
   SqlExpressPackage = 'SQLEXPR_x64_ENU.exe';
 
+function RegGetSqlInstanceNames(RootKey: Integer; var Names: TArrayOfString): Boolean;
+begin
+  Result := RegGetValueNames(
+    RootKey,
+    'SOFTWARE\Microsoft\Microsoft SQL Server\Instance Names\SQL',
+    Names);
+end;
+
+function SqlServiceInstalled(const ServiceName: String): Boolean;
+begin
+  Result :=
+    RegKeyExists(HKLM64, 'SYSTEM\CurrentControlSet\Services\' + ServiceName)
+    or RegKeyExists(HKLM32, 'SYSTEM\CurrentControlSet\Services\' + ServiceName);
+end;
+
 function SqlExpressInstanceExists: Boolean;
 var
   InstanceId: String;
@@ -71,11 +86,83 @@ begin
       'SOFTWARE\Microsoft\Microsoft SQL Server\Instance Names\SQL',
       'SQLEXPRESS',
       InstanceId);
+  if not Result then
+    Result := SqlServiceInstalled('MSSQL$SQLEXPRESS');
+end;
+
+{ True when any SQL Server engine instance is installed (default or named) or its service exists. }
+function AnySqlServerPresent: Boolean;
+var
+  Names: TArrayOfString;
+begin
+  Result := False;
+
+  if RegGetSqlInstanceNames(HKLM64, Names) and (GetArrayLength(Names) > 0) then
+  begin
+    Result := True;
+    Exit;
+  end;
+  if RegGetSqlInstanceNames(HKLM32, Names) and (GetArrayLength(Names) > 0) then
+  begin
+    Result := True;
+    Exit;
+  end;
+
+  { Services still count when Instance Names is missing/incomplete. }
+  if SqlServiceInstalled('MSSQLSERVER')
+     or SqlServiceInstalled('MSSQL$SQLEXPRESS') then
+    Result := True;
+end;
+
+{ Prefer SQLEXPRESS, else first named instance, else default instance "." }
+function ResolveSqlServerForConfig: String;
+var
+  Names: TArrayOfString;
+  I: Integer;
+  Name: String;
+begin
+  if SqlExpressInstanceExists then
+  begin
+    Result := '.\\SQLEXPRESS';
+    Exit;
+  end;
+
+  SetArrayLength(Names, 0);
+  if not RegGetSqlInstanceNames(HKLM64, Names) or (GetArrayLength(Names) = 0) then
+    RegGetSqlInstanceNames(HKLM32, Names);
+
+  for I := 0 to GetArrayLength(Names) - 1 do
+  begin
+    Name := Names[I];
+    if CompareText(Name, 'MSSQLSERVER') = 0 then
+    begin
+      Result := '.';
+      Exit;
+    end;
+  end;
+
+  for I := 0 to GetArrayLength(Names) - 1 do
+  begin
+    Name := Names[I];
+    if CompareText(Name, 'MSSQLSERVER') <> 0 then
+    begin
+      Result := '.\\' + Name;
+      Exit;
+    end;
+  end;
+
+  if SqlServiceInstalled('MSSQLSERVER') then
+  begin
+    Result := '.';
+    Exit;
+  end;
+
+  Result := '.\\SQLEXPRESS';
 end;
 
 function WriteConnectionJson: Boolean;
 var
-  Dir, Path, Json: String;
+  Dir, Path, Json, Server: String;
 begin
   Dir := ExpandConstant('{localappdata}\Authenticator');
   if not ForceDirectories(Dir) then
@@ -86,14 +173,22 @@ begin
   end;
 
   Path := Dir + '\connection.json';
+  if FileExists(Path) then
+  begin
+    Log('Leaving existing connection.json in place: ' + Path);
+    Result := True;
+    Exit;
+  end;
+
+  Server := ResolveSqlServerForConfig;
   Json :=
     '{' + #13#10 +
-    '  "Server": ".\\SQLEXPRESS",' + #13#10 +
+    '  "Server": "' + Server + '",' + #13#10 +
     '  "Database": "Authenticator"' + #13#10 +
     '}';
   Result := SaveStringToFile(Path, Json, False);
   if Result then
-    Log('Wrote ' + Path)
+    Log('Wrote ' + Path + ' (Server=' + Server + ')')
   else
     Log('Failed to write ' + Path);
 end;
@@ -188,13 +283,13 @@ begin
   Result := '';
   NeedsRestart := False;
 
-  if SqlExpressInstanceExists then
+  if AnySqlServerPresent then
   begin
-    Log('SQLEXPRESS instance already present; skipping Express install.');
+    Log('SQL Server already installed/present (instance or service); skipping Express download/install.');
     Exit;
   end;
 
-  Log('SQLEXPRESS not found; installing SQL Server Express.');
+  Log('No local SQL Server found; downloading and installing SQL Server Express (SQLEXPRESS).');
   if not InstallSqlExpress then
     Result := 'SQL Server Express (SQLEXPRESS) is required and could not be installed.';
 end;
