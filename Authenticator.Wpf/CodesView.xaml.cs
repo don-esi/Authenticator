@@ -112,7 +112,7 @@ public partial class CodesView : UserControl
             if (rows.Count == 0)
                 return;
 
-            // Client-side TOTP: SQL dbo.GetTotp cannot read AES-GCM secrets at rest.
+            // Client-side TOTP via Authenticator.Crypto (AES-GCM secrets require unlocked DEK).
             await Task.Yield();
             if (seq != _refreshSeq)
                 return;

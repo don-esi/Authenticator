@@ -7,13 +7,6 @@ using Authenticator.Logging;
 
 namespace Authenticator.Services;
 
-public sealed class YubiKeyRegistration
-{
-    /// <summary>First 12 modhex characters of a Yubico OTP (public id).</summary>
-    public required string PublicId { get; init; }
-    public int? SerialNumber { get; init; }
-}
-
 /// <summary>
 /// YubiKey unlock via touch OTP (keyboard wedge).
 /// Does not open FIDO2/PCSC and does not reprogram slots.

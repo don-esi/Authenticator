@@ -1,8 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
-using Authenticator.Logging;
 
-namespace Authenticator.Services;
+namespace Authenticator.Crypto;
 
 /// <summary>
 /// Session DEK holder and wrap/unwrap helpers for unlock methods.
@@ -49,8 +48,6 @@ public sealed class VaultKeyService
             ClearUnlockedDek_NoLock();
             _dek = (byte[])dek.Clone();
         }
-
-        LoggingConfiguration.LogInfo("Vault DEK loaded into session.", nameof(VaultKeyService));
     }
 
     public byte[] CreateDek()
@@ -64,7 +61,6 @@ public sealed class VaultKeyService
     {
         lock (_gate)
             ClearUnlockedDek_NoLock();
-        LoggingConfiguration.LogInfo("Vault DEK cleared from session.", nameof(VaultKeyService));
     }
 
     public static byte[] DerivePinKek(string pin, byte[] salt) =>

@@ -1,10 +1,8 @@
-using System.IO;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
-using Authenticator.Logging;
 
-namespace Authenticator.Services;
+namespace Authenticator.Crypto;
 
 public sealed class LockCredentials
 {
@@ -96,9 +94,8 @@ public sealed class LockCredentialStore
             _cached = JsonSerializer.Deserialize<LockCredentials>(json, JsonOptions) ?? new LockCredentials();
             return _cached;
         }
-        catch (Exception ex)
+        catch
         {
-            LoggingConfiguration.LogException(ex, "Failed to load lock credentials.", nameof(LockCredentialStore));
             _cached = new LockCredentials();
             return _cached;
         }
@@ -118,9 +115,6 @@ public sealed class LockCredentialStore
         var protectedBytes = ProtectedData.Protect(jsonBytes, optionalEntropy: null, DataProtectionScope.CurrentUser);
         File.WriteAllBytes(_path, protectedBytes);
         _cached = credentials;
-        LoggingConfiguration.LogInfo(
-            $"Lock credentials saved. Pin={credentials.PinEnabled}, YubiKey={credentials.YubiKeyEnabled}, Hello={credentials.HelloUnlockEnabled}.",
-            nameof(LockCredentialStore));
     }
 
     public void SetPin(string pin, VaultKeyService? keys = null)
@@ -230,7 +224,6 @@ public sealed class LockCredentialStore
 
         if (string.IsNullOrWhiteSpace(credentials.YubiSlotKek) || string.IsNullOrWhiteSpace(credentials.YubiDekWrap))
         {
-            // Legacy registration without wraps: create DEK if session already has one, or mint new.
             var dek = EnsureDek(credentials, keys);
             EnsureYubiWrap(credentials, dek);
             EnsurePinWrapIfPossible(credentials, dek);
@@ -372,7 +365,6 @@ public sealed class LockCredentialStore
 
     private static void EnsurePinWrapIfPossible(LockCredentials credentials, byte[] dek)
     {
-        // Cannot recreate PIN wrap without the PIN; leave for next PIN unlock/set.
         _ = credentials;
         _ = dek;
     }

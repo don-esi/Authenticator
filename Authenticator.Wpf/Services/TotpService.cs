@@ -1,5 +1,3 @@
-using System;
-using System.Security.Cryptography;
 using Authenticator.Data.Models;
 using Authenticator.Logging;
 using OtpNet;
@@ -20,10 +18,12 @@ public class TotpService
 
         try
         {
-            var totp = CreateTotp(account, account.Digits);
-            return totp.ComputeTotp();
+            var code = TotpGenerator.TryGenerate(account.SecretKey, account.Algorithm, account.Digits, account.Period);
+            if (string.IsNullOrEmpty(code))
+                throw new InvalidOperationException($"Failed to generate TOTP code for account id {account.Id}.");
+            return code;
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not InvalidOperationException)
         {
             LoggingConfiguration.LogException(ex, $"Failed to generate TOTP code for account id {account.Id}.", nameof(TotpService));
             throw;
@@ -39,10 +39,12 @@ public class TotpService
 
         try
         {
-            var totp = CreateTotp(account, digits);
-            return totp.ComputeTotp();
+            var code = TotpGenerator.TryGenerate(account.SecretKey, account.Algorithm, digits, account.Period);
+            if (string.IsNullOrEmpty(code))
+                throw new InvalidOperationException($"Failed to generate TOTP code for account id {account.Id} with digits={digits}.");
+            return code;
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not InvalidOperationException)
         {
             LoggingConfiguration.LogException(ex, $"Failed to generate TOTP code for account id {account.Id} with digits={digits}.", nameof(TotpService));
             throw;
@@ -92,7 +94,8 @@ public class TotpService
 
         try
         {
-            var totp = CreateTotp(account, account.Digits);
+            var secret = NormalizeSecret(account.SecretKey);
+            var totp = new Totp(secret, step: account.Period <= 0 ? 30 : account.Period, mode: ParseMode(account.Algorithm), totpSize: account.Digits <= 0 ? 6 : account.Digits);
             var isValid = totp.VerifyTotp(code, out _, new VerificationWindow(previous: 1, future: 1));
             LoggingConfiguration.LogDebug($"Validated TOTP code for account id {account.Id}. Result={isValid}.", nameof(TotpService));
             return isValid;
@@ -117,12 +120,6 @@ public class TotpService
         LoggingConfiguration.LogDebug($"Generating setup URI. Issuer={issuer}, Account={accountName}, Algorithm={algorithm}, Digits={digits}, Period={period}.", nameof(TotpService));
 
         return $"otpauth://totp/{Uri.EscapeDataString(issuer)}:{Uri.EscapeDataString(accountName)}?secret={Uri.EscapeDataString(secretKey)}&issuer={Uri.EscapeDataString(issuer)}&algorithm={Uri.EscapeDataString(algorithm)}&digits={digits}&period={period}";
-    }
-
-    private static Totp CreateTotp(Account account, int digits)
-    {
-        var secret = NormalizeSecret(account.SecretKey);
-        return new Totp(secret, step: account.Period, mode: ParseMode(account.Algorithm), totpSize: digits);
     }
 
     private static byte[] NormalizeSecret(string secretKey)
