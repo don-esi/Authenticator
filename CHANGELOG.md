@@ -2,6 +2,13 @@
 
 All notable changes to Authenticator are documented here.
 
+## [1.0.1] — 2026-11-14
+
+### Changed
+
+- Moved TOTP and crypto helpers into `Authenticator.Crypto`.
+- Removed unused SQL CLR `dbo.GetTotp` project and install scripts from the solution.
+
 ## [1.0.0] — 2026-11-11
 
 ### Added
