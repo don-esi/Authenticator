@@ -1,9 +1,18 @@
 <Application x:Class="Authenticator.App"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-             xmlns:local="clr-namespace:Authenticator">
+             xmlns:local="clr-namespace:Authenticator"
+             xmlns:syncfusion="http://schemas.syncfusion.com/wpf">
     <Application.Resources>
         <local:ProgressWidthConverter x:Key="ProgressWidthConverter" />
+
+        <!-- ButtonAdv defaults to a built-in glyph; collapse icons unless a screen sets them. -->
+        <Style TargetType="{x:Type syncfusion:ButtonAdv}">
+            <Setter Property="IconWidth" Value="0" />
+            <Setter Property="IconHeight" Value="0" />
+            <Setter Property="SmallIcon" Value="{x:Null}" />
+            <Setter Property="LargeIcon" Value="{x:Null}" />
+        </Style>
 
         <SolidColorBrush x:Key="PageBackgroundBrush" Color="#F8F9FA" />
         <SolidColorBrush x:Key="CardBackgroundBrush" Color="#F4F6FC" />
@@ -254,6 +263,72 @@
             <Setter Property="FontSize" Value="16" />
             <Setter Property="Padding" Value="0,4" />
             <Setter Property="Foreground" Value="{DynamicResource PrimaryTextBrush}" />
+        </Style>
+
+        <Style x:Key="SettingsExpander" TargetType="Expander">
+            <Setter Property="Foreground" Value="{DynamicResource PrimaryTextBrush}" />
+            <Setter Property="Background" Value="{DynamicResource CardBackgroundBrush}" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Expander">
+                        <Border Background="{TemplateBinding Background}" CornerRadius="12" Padding="12,10">
+                            <DockPanel>
+                                <ToggleButton
+                                    x:Name="HeaderSite"
+                                    DockPanel.Dock="Top"
+                                    Background="Transparent"
+                                    BorderThickness="0"
+                                    Cursor="Hand"
+                                    Focusable="False"
+                                    IsChecked="{Binding IsExpanded, Mode=TwoWay, RelativeSource={RelativeSource TemplatedParent}}"
+                                    Padding="0">
+                                    <ToggleButton.Template>
+                                        <ControlTemplate TargetType="ToggleButton">
+                                            <Border Background="Transparent" Padding="{TemplateBinding Padding}">
+                                                <Grid>
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="*" />
+                                                        <ColumnDefinition Width="Auto" />
+                                                    </Grid.ColumnDefinitions>
+                                                    <ContentPresenter
+                                                        Content="{Binding Header, RelativeSource={RelativeSource AncestorType=Expander}}"
+                                                        VerticalAlignment="Center" />
+                                                    <TextBlock
+                                                        x:Name="Chevron"
+                                                        Grid.Column="1"
+                                                        Margin="8,0,0,0"
+                                                        VerticalAlignment="Center"
+                                                        FontFamily="Segoe MDL2 Assets"
+                                                        FontSize="12"
+                                                        Foreground="{DynamicResource SecondaryTextBrush}"
+                                                        Text="&#xE70D;" />
+                                                </Grid>
+                                            </Border>
+                                            <ControlTemplate.Triggers>
+                                                <Trigger Property="IsChecked" Value="True">
+                                                    <Setter TargetName="Chevron" Property="Text" Value="&#xE70E;" />
+                                                </Trigger>
+                                            </ControlTemplate.Triggers>
+                                        </ControlTemplate>
+                                    </ToggleButton.Template>
+                                </ToggleButton>
+                                <ContentPresenter
+                                    x:Name="ExpandSite"
+                                    Margin="0,4,0,0"
+                                    Visibility="Collapsed"
+                                    ContentSource="Content" />
+                            </DockPanel>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsExpanded" Value="True">
+                                <Setter TargetName="ExpandSite" Property="Visibility" Value="Visible" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
         </Style>
     </Application.Resources>
 </Application>

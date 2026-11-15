@@ -2,440 +2,240 @@
 	x:Class="Authenticator.SettingsView"
 	xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
 	xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+	xmlns:syncfusion="http://schemas.syncfusion.com/wpf"
 	Background="Transparent">
-	<ScrollViewer VerticalScrollBarVisibility="Auto">
-		<StackPanel Margin="20,16,20,16">
+	<DockPanel Margin="16,12,16,12">
+		<Border
+			DockPanel.Dock="Bottom"
+			Margin="0,12,0,0"
+			Padding="12,10"
+			Background="{DynamicResource CardBackgroundBrush}"
+			CornerRadius="12"
+			BorderBrush="{DynamicResource BorderBrushColor}"
+			BorderThickness="1">
+			<StackPanel>
+				<syncfusion:ButtonAdv
+					x:Name="ExitAppButton"
+					Height="44"
+					Click="ExitApp_Click"
+					Label="Exit app"
+					SizeMode="Normal"
+					FontSize="15"
+					FontWeight="SemiBold"
+					Foreground="White"
+					Background="{DynamicResource DangerBrush}"
+					AutomationProperties.Name="Exit app" />
+				<TextBlock
+					x:Name="AppVersionText"
+					Margin="0,8,0,0"
+					HorizontalAlignment="Center"
+					FontSize="12"
+					Foreground="{DynamicResource SecondaryTextBrush}"
+					Text="Authenticator" />
+			</StackPanel>
+		</Border>
+
+		<StackPanel DockPanel.Dock="Top" Margin="0,0,0,8">
 			<TextBlock
-				Margin="0,8,0,16"
+				Margin="0,4,0,10"
 				HorizontalAlignment="Center"
-				FontSize="28"
+				FontSize="24"
 				FontWeight="SemiBold"
 				Foreground="{DynamicResource PrimaryTextBrush}"
 				Text="Settings" />
-
-			<Border
-				Margin="0,0,0,12"
-				Padding="16"
-				Background="{DynamicResource CardBackgroundBrush}"
-				CornerRadius="16">
+			<Border Padding="12,10" Background="{DynamicResource CardBackgroundBrush}" CornerRadius="12">
 				<Grid>
 					<Grid.ColumnDefinitions>
 						<ColumnDefinition Width="*" />
 						<ColumnDefinition Width="*" />
 					</Grid.ColumnDefinitions>
 					<StackPanel>
-						<TextBlock
-							HorizontalAlignment="Center"
-							Foreground="{DynamicResource SecondaryTextBrush}"
-							Text="Accounts" />
-						<TextBlock
-							x:Name="AccountCountText"
-							HorizontalAlignment="Center"
-							FontSize="28"
-							FontWeight="SemiBold"
-							Foreground="{DynamicResource PrimaryTextBrush}"
-							Text="0" />
+						<TextBlock HorizontalAlignment="Center" FontSize="12" Foreground="{DynamicResource SecondaryTextBrush}" Text="Accounts" />
+						<TextBlock x:Name="AccountCountText" HorizontalAlignment="Center" FontSize="22" FontWeight="SemiBold" Foreground="{DynamicResource PrimaryTextBrush}" Text="0" />
 					</StackPanel>
 					<StackPanel Grid.Column="1">
-						<TextBlock
-							HorizontalAlignment="Center"
-							Foreground="{DynamicResource SecondaryTextBrush}"
-							Text="Folders" />
-						<TextBlock
-							x:Name="FolderCountText"
-							HorizontalAlignment="Center"
-							FontSize="28"
-							FontWeight="SemiBold"
-							Foreground="{DynamicResource PrimaryTextBrush}"
-							Text="0" />
+						<TextBlock HorizontalAlignment="Center" FontSize="12" Foreground="{DynamicResource SecondaryTextBrush}" Text="Folders" />
+						<TextBlock x:Name="FolderCountText" HorizontalAlignment="Center" FontSize="22" FontWeight="SemiBold" Foreground="{DynamicResource PrimaryTextBrush}" Text="0" />
 					</StackPanel>
 				</Grid>
 			</Border>
+		</StackPanel>
 
-			<TextBlock
-				Margin="4,8,0,8"
-				FontSize="12"
-				Foreground="{DynamicResource SecondaryTextBrush}"
-				Text="UNLOCK METHODS" />
-			<Border
-				Margin="0,0,0,12"
-				Padding="16"
-				Background="{DynamicResource CardBackgroundBrush}"
-				CornerRadius="16">
-				<StackPanel>
-					<TextBlock
-						Margin="0,0,0,12"
-						Foreground="{DynamicResource SecondaryTextBrush}"
-						Text="Auto-lock needs a PIN and/or YubiKey. Without one of these, the lock screen cannot protect codes."
-						TextWrapping="Wrap" />
-					<TextBlock
-						x:Name="PinStatusText"
-						Margin="0,0,0,8"
-						FontWeight="SemiBold"
-						Foreground="{DynamicResource PrimaryTextBrush}"
-						Text="PIN: not set" />
-					<Grid Margin="0,0,0,8">
-						<Grid.ColumnDefinitions>
-							<ColumnDefinition Width="*" />
-							<ColumnDefinition Width="*" />
-						</Grid.ColumnDefinitions>
-						<PasswordBox
-							x:Name="PinBox"
-							Height="36"
-							Margin="0,0,4,0"
-							Padding="8,6"
-							Background="{DynamicResource SecondaryBackgroundBrush}"
-							Foreground="{DynamicResource PrimaryTextBrush}"
-							CaretBrush="{DynamicResource PrimaryTextBrush}"
-							AutomationProperties.Name="New PIN" />
-						<PasswordBox
-							x:Name="PinConfirmBox"
-							Grid.Column="1"
-							Height="36"
-							Margin="4,0,0,0"
-							Padding="8,6"
-							Background="{DynamicResource SecondaryBackgroundBrush}"
-							Foreground="{DynamicResource PrimaryTextBrush}"
-							CaretBrush="{DynamicResource PrimaryTextBrush}"
-							AutomationProperties.Name="Confirm PIN" />
-					</Grid>
-					<Grid Margin="0,0,0,16">
-						<Grid.ColumnDefinitions>
-							<ColumnDefinition Width="*" />
-							<ColumnDefinition Width="Auto" />
-						</Grid.ColumnDefinitions>
-						<Button
-							Click="SetPin_Click"
-							Content="Set PIN"
-							Style="{StaticResource PrimaryButton}" />
-						<Button
-							x:Name="ClearPinButton"
-							Grid.Column="1"
-							Margin="8,0,0,0"
-							Click="ClearPin_Click"
-							Content="Clear PIN"
-							Style="{StaticResource SecondaryButton}" />
-					</Grid>
+		<ScrollViewer VerticalScrollBarVisibility="Auto" Padding="0,0,2,0">
+			<syncfusion:GroupBar x:Name="SettingsAccordion">
+				<syncfusion:GroupBarItem HeaderText="Shared SQL connection" IsSelected="False">
+					<StackPanel Margin="8">
+						<TextBlock x:Name="ConnectionSummaryText" FontSize="11" Margin="0,0,0,8" Foreground="{DynamicResource SecondaryTextBrush}" Text="Local / Host / Join" />
+						<TextBlock x:Name="ConnectionStatusText" Margin="0,0,0,8" FontWeight="SemiBold" Foreground="{DynamicResource PrimaryTextBrush}" TextWrapping="Wrap" Text="Connection: …" />
+						<TextBlock Margin="0,0,0,4" Foreground="{DynamicResource SecondaryTextBrush}" Text="Active profile" FontSize="12" />
+						<ComboBox x:Name="ProfileCombo" Margin="0,0,0,8" SelectionChanged="ProfileCombo_SelectionChanged" />
+						<TextBlock Text="Server" FontSize="12" Foreground="{DynamicResource SecondaryTextBrush}" />
+						<TextBox x:Name="ServerBox" Margin="0,0,0,6" />
+						<TextBlock Text="Database" FontSize="12" Foreground="{DynamicResource SecondaryTextBrush}" />
+						<TextBox x:Name="DatabaseBox" Margin="0,0,0,8" Text="Authenticator" />
+						<TextBlock Text="Role" FontSize="12" Foreground="{DynamicResource SecondaryTextBrush}" />
+						<ComboBox x:Name="RoleCombo" Margin="0,0,0,8">
+							<ComboBoxItem Content="Local" Tag="Local" />
+							<ComboBoxItem Content="Host" Tag="Host" />
+							<ComboBoxItem Content="Join" Tag="Join" />
+						</ComboBox>
+						<TextBlock Text="Recovery key (join enrollment)" FontSize="12" Foreground="{DynamicResource SecondaryTextBrush}" />
+						<TextBox x:Name="RecoveryKeyBox" Margin="0,0,0,8" />
+						<WrapPanel>
+							<syncfusion:ButtonAdv Label="Save profile" Margin="0,0,8,8" Click="SaveConnection_Click" SizeMode="Normal" />
+							<syncfusion:ButtonAdv Label="Test" Margin="0,0,8,8" Click="TestConnection_Click" SizeMode="Normal" />
+							<syncfusion:ButtonAdv Label="Discover LAN" Margin="0,0,8,8" Click="Discover_Click" SizeMode="Normal" />
+							<syncfusion:ButtonAdv Label="Enroll recovery" Margin="0,0,8,8" Click="EnrollRecovery_Click" SizeMode="Normal" />
+							<syncfusion:ButtonAdv Label="Reconcile offline" Margin="0,0,8,8" Click="ReconcileOffline_Click" SizeMode="Normal" />
+						</WrapPanel>
+						<syncfusion:SfDataGrid
+							x:Name="DiscoveryList"
+							Height="120"
+							Margin="0,0,0,4"
+							AutoGenerateColumns="False"
+							AllowEditing="False"
+							AllowFiltering="False"
+							AllowSorting="True"
+							SelectionMode="Single"
+							ColumnSizer="Star"
+							MouseDoubleClick="DiscoveryList_DoubleClick">
+							<syncfusion:SfDataGrid.Columns>
+								<syncfusion:GridTextColumn HeaderText="Server" MappingName="Server" MinimumWidth="120" />
+								<syncfusion:GridTextColumn HeaderText="Database" MappingName="Database" Width="120" ColumnSizer="None" />
+								<syncfusion:GridTextColumn HeaderText="Fingerprint" MappingName="VdekFingerprintPrefix" Width="100" ColumnSizer="None" />
+							</syncfusion:SfDataGrid.Columns>
+						</syncfusion:SfDataGrid>
+						<TextBlock x:Name="ConnectionActionStatus" FontSize="12" Foreground="{DynamicResource SecondaryTextBrush}" TextWrapping="Wrap" />
+					</StackPanel>
+				</syncfusion:GroupBarItem>
 
-					<TextBlock
-						x:Name="YubiStatusText"
-						Margin="0,0,0,8"
-						FontWeight="SemiBold"
-						Foreground="{DynamicResource PrimaryTextBrush}"
-						Text="YubiKey: not registered" />
-					<TextBlock
-						Margin="0,0,0,8"
-						FontSize="12"
-						Foreground="{DynamicResource SecondaryTextBrush}"
-						Text="Uses YubiKey touch OTP"
-						TextWrapping="Wrap" />
-					<Grid>
-						<Grid.ColumnDefinitions>
-							<ColumnDefinition Width="*" />
-							<ColumnDefinition Width="Auto" />
-						</Grid.ColumnDefinitions>
-						<Button
-							Click="RegisterYubiKey_Click"
-							Content="Register YubiKey"
-							Style="{StaticResource PrimaryButton}" />
-						<Button
-							x:Name="ClearYubiButton"
-							Grid.Column="1"
-							Margin="8,0,0,0"
-							Click="ClearYubiKey_Click"
-							Content="Remove"
-							Style="{StaticResource SecondaryButton}" />
-					</Grid>
-
-					<StackPanel x:Name="HelloPanel" Margin="0,16,0,0" Visibility="Collapsed">
-						<TextBlock
-							x:Name="HelloStatusText"
-							Margin="0,0,0,8"
-							FontWeight="SemiBold"
-							Foreground="{DynamicResource PrimaryTextBrush}"
-							Text="Windows Hello: not enabled" />
-						<TextBlock
-							Margin="0,0,0,8"
-							FontSize="12"
-							Foreground="{DynamicResource SecondaryTextBrush}"
-							Text="Unlock with fingerprint, face, or Windows Hello PIN"
-							TextWrapping="Wrap" />
+				<syncfusion:GroupBarItem HeaderText="Unlock methods" IsSelected="True">
+					<StackPanel Margin="8">
+						<TextBlock x:Name="UnlockSummaryText" FontSize="11" Margin="0,0,0,8" Foreground="{DynamicResource SecondaryTextBrush}" Text="PIN · YubiKey · Windows Hello" />
+						<TextBlock Margin="0,0,0,12" Foreground="{DynamicResource SecondaryTextBrush}" Text="Auto-lock needs a PIN and/or YubiKey. Without one of these, the lock screen cannot protect codes." TextWrapping="Wrap" />
+						<TextBlock x:Name="PinStatusText" Margin="0,0,0,8" FontWeight="SemiBold" Foreground="{DynamicResource PrimaryTextBrush}" Text="PIN: not set" />
+						<Grid Margin="0,0,0,8">
+							<Grid.ColumnDefinitions>
+								<ColumnDefinition Width="*" />
+								<ColumnDefinition Width="*" />
+							</Grid.ColumnDefinitions>
+							<PasswordBox x:Name="PinBox" Height="36" Margin="0,0,4,0" Padding="8,6" Background="{DynamicResource SecondaryBackgroundBrush}" Foreground="{DynamicResource PrimaryTextBrush}" CaretBrush="{DynamicResource PrimaryTextBrush}" AutomationProperties.Name="New PIN" />
+							<PasswordBox x:Name="PinConfirmBox" Grid.Column="1" Height="36" Margin="4,0,0,0" Padding="8,6" Background="{DynamicResource SecondaryBackgroundBrush}" Foreground="{DynamicResource PrimaryTextBrush}" CaretBrush="{DynamicResource PrimaryTextBrush}" AutomationProperties.Name="Confirm PIN" />
+						</Grid>
+						<Grid Margin="0,0,0,16">
+							<Grid.ColumnDefinitions>
+								<ColumnDefinition Width="*" />
+								<ColumnDefinition Width="Auto" />
+							</Grid.ColumnDefinitions>
+							<syncfusion:ButtonAdv Label="Set PIN" Click="SetPin_Click" SizeMode="Normal" />
+							<syncfusion:ButtonAdv x:Name="ClearPinButton" Grid.Column="1" Margin="8,0,0,0" Label="Clear PIN" Click="ClearPin_Click" SizeMode="Normal" />
+						</Grid>
+						<TextBlock x:Name="YubiStatusText" Margin="0,0,0,8" FontWeight="SemiBold" Foreground="{DynamicResource PrimaryTextBrush}" Text="YubiKey: not registered" />
+						<TextBlock Margin="0,0,0,8" FontSize="12" Foreground="{DynamicResource SecondaryTextBrush}" Text="Uses YubiKey touch OTP" TextWrapping="Wrap" />
 						<Grid>
 							<Grid.ColumnDefinitions>
 								<ColumnDefinition Width="*" />
 								<ColumnDefinition Width="Auto" />
 							</Grid.ColumnDefinitions>
-							<Button
-								x:Name="EnableHelloButton"
-								Click="EnableHello_Click"
-								Content="Enable Windows Hello"
-								Style="{StaticResource PrimaryButton}" />
-							<Button
-								x:Name="ClearHelloButton"
-								Grid.Column="1"
-								Margin="8,0,0,0"
-								Click="ClearHello_Click"
-								Content="Remove"
-								Style="{StaticResource SecondaryButton}" />
+							<syncfusion:ButtonAdv Label="Register YubiKey" Click="RegisterYubiKey_Click" SizeMode="Normal" />
+							<syncfusion:ButtonAdv x:Name="ClearYubiButton" Grid.Column="1" Margin="8,0,0,0" Label="Remove" Click="ClearYubiKey_Click" SizeMode="Normal" />
+						</Grid>
+						<StackPanel x:Name="HelloPanel" Margin="0,16,0,0" Visibility="Collapsed">
+							<TextBlock x:Name="HelloStatusText" Margin="0,0,0,8" FontWeight="SemiBold" Foreground="{DynamicResource PrimaryTextBrush}" Text="Windows Hello: not enabled" />
+							<TextBlock Margin="0,0,0,8" FontSize="12" Foreground="{DynamicResource SecondaryTextBrush}" Text="Unlock with fingerprint, face, or Windows Hello PIN" TextWrapping="Wrap" />
+							<Grid>
+								<Grid.ColumnDefinitions>
+									<ColumnDefinition Width="*" />
+									<ColumnDefinition Width="Auto" />
+								</Grid.ColumnDefinitions>
+								<syncfusion:ButtonAdv x:Name="EnableHelloButton" Label="Enable Windows Hello" Click="EnableHello_Click" SizeMode="Normal" />
+								<syncfusion:ButtonAdv x:Name="ClearHelloButton" Grid.Column="1" Margin="8,0,0,0" Label="Remove" Click="ClearHello_Click" SizeMode="Normal" />
+							</Grid>
+						</StackPanel>
+						<TextBlock x:Name="LockMethodStatus" Margin="0,12,0,0" Foreground="{DynamicResource PrimaryTextBrush}" TextWrapping="Wrap" />
+					</StackPanel>
+				</syncfusion:GroupBarItem>
+
+				<syncfusion:GroupBarItem HeaderText="Appearance">
+					<StackPanel x:Name="ThemePanel" Margin="8" />
+				</syncfusion:GroupBarItem>
+
+				<syncfusion:GroupBarItem HeaderText="Desktop">
+					<StackPanel Margin="8">
+						<TextBlock Margin="0,0,0,8" FontWeight="SemiBold" Foreground="{DynamicResource PrimaryTextBrush}" Text="Dock to desktop" />
+						<TextBlock Margin="0,0,0,8" FontSize="12" Foreground="{DynamicResource SecondaryTextBrush}" Text="Collapsed view uses an edge handle. Hover or click to fly the window out from that side." TextWrapping="Wrap" />
+						<StackPanel x:Name="DockPanel" Margin="0,0,0,12" />
+						<TextBlock Margin="0,0,0,6" FontWeight="SemiBold" Foreground="{DynamicResource PrimaryTextBrush}" Text="Handle color" />
+						<WrapPanel x:Name="DockHandleColorPanel" Margin="0,0,0,10" />
+						<Grid Margin="0,0,0,12">
+							<Grid.ColumnDefinitions>
+								<ColumnDefinition Width="*" />
+								<ColumnDefinition Width="Auto" />
+							</Grid.ColumnDefinitions>
+							<StackPanel>
+								<TextBlock FontWeight="SemiBold" Foreground="{DynamicResource PrimaryTextBrush}" Text="Handle transparency" />
+								<TextBlock FontSize="12" Foreground="{DynamicResource SecondaryTextBrush}" Text="Lower values make the edge handle more see-through" TextWrapping="Wrap" />
+							</StackPanel>
+							<StackPanel Grid.Column="1" Width="140" VerticalAlignment="Center">
+								<Slider x:Name="DockHandleOpacitySlider" Minimum="0.25" Maximum="1" TickFrequency="0.05" IsSnapToTickEnabled="True" ValueChanged="DockHandleOpacity_Changed" />
+								<TextBlock x:Name="DockHandleOpacityLabel" HorizontalAlignment="Right" FontSize="12" Foreground="{DynamicResource SecondaryTextBrush}" Text="92%" />
+							</StackPanel>
+						</Grid>
+						<Grid Margin="0,0,0,10">
+							<Grid.ColumnDefinitions>
+								<ColumnDefinition Width="*" />
+								<ColumnDefinition Width="Auto" />
+							</Grid.ColumnDefinitions>
+							<StackPanel>
+								<TextBlock FontWeight="SemiBold" Foreground="{DynamicResource PrimaryTextBrush}" Text="Always on top when docked" />
+								<TextBlock FontSize="12" Foreground="{DynamicResource SecondaryTextBrush}" Text="Keeps the expanded window above other apps" TextWrapping="Wrap" />
+							</StackPanel>
+							<ToggleButton x:Name="AlwaysOnTopToggle" Grid.Column="1" VerticalAlignment="Center" Checked="DesktopToggle_Changed" Style="{StaticResource SwitchToggle}" Unchecked="DesktopToggle_Changed" />
+						</Grid>
+						<Grid Margin="0,0,0,10">
+							<Grid.ColumnDefinitions>
+								<ColumnDefinition Width="*" />
+								<ColumnDefinition Width="Auto" />
+							</Grid.ColumnDefinitions>
+							<StackPanel>
+								<TextBlock FontWeight="SemiBold" Foreground="{DynamicResource PrimaryTextBrush}" Text="Minimize to tray" />
+								<TextBlock FontSize="12" Foreground="{DynamicResource SecondaryTextBrush}" Text="Close hides to the notification area when not docked" TextWrapping="Wrap" />
+							</StackPanel>
+							<ToggleButton x:Name="MinimizeToTrayToggle" Grid.Column="1" VerticalAlignment="Center" Checked="DesktopToggle_Changed" Style="{StaticResource SwitchToggle}" Unchecked="DesktopToggle_Changed" />
+						</Grid>
+						<Grid Margin="0,0,0,4">
+							<Grid.ColumnDefinitions>
+								<ColumnDefinition Width="*" />
+								<ColumnDefinition Width="Auto" />
+							</Grid.ColumnDefinitions>
+							<StackPanel>
+								<TextBlock FontWeight="SemiBold" Foreground="{DynamicResource PrimaryTextBrush}" Text="Global hotkey" />
+								<TextBlock FontSize="12" Foreground="{DynamicResource SecondaryTextBrush}" Text="Ctrl+Shift+A shows or expands the window" TextWrapping="Wrap" />
+							</StackPanel>
+							<ToggleButton x:Name="GlobalHotkeyToggle" Grid.Column="1" VerticalAlignment="Center" Checked="DesktopToggle_Changed" Style="{StaticResource SwitchToggle}" Unchecked="DesktopToggle_Changed" />
 						</Grid>
 					</StackPanel>
+				</syncfusion:GroupBarItem>
 
-					<TextBlock
-						x:Name="LockMethodStatus"
-						Margin="0,12,0,0"
-						Foreground="{DynamicResource PrimaryTextBrush}"
-						TextWrapping="Wrap" />
-				</StackPanel>
-			</Border>
+				<syncfusion:GroupBarItem HeaderText="Auto lock">
+					<StackPanel x:Name="AutoLockPanel" Margin="8" />
+				</syncfusion:GroupBarItem>
 
-			<TextBlock
-				Margin="4,8,0,8"
-				FontSize="12"
-				Foreground="{DynamicResource SecondaryTextBrush}"
-				Text="APPEARANCE" />
-			<Border
-				Margin="0,0,0,12"
-				Padding="8"
-				Background="{DynamicResource CardBackgroundBrush}"
-				CornerRadius="16">
-				<StackPanel x:Name="ThemePanel" />
-			</Border>
-
-			<TextBlock
-				Margin="4,8,0,8"
-				FontSize="12"
-				Foreground="{DynamicResource SecondaryTextBrush}"
-				Text="DESKTOP" />
-			<Border
-				Margin="0,0,0,12"
-				Padding="16"
-				Background="{DynamicResource CardBackgroundBrush}"
-				CornerRadius="16">
-				<StackPanel>
-					<TextBlock
-						Margin="0,0,0,8"
-						FontWeight="SemiBold"
-						Foreground="{DynamicResource PrimaryTextBrush}"
-						Text="Dock to desktop" />
-					<TextBlock
-						Margin="0,0,0,8"
-						FontSize="12"
-						Foreground="{DynamicResource SecondaryTextBrush}"
-						Text="Collapsed view uses an edge handle. Hover or click to fly the window out from that side."
-						TextWrapping="Wrap" />
-					<StackPanel x:Name="DockPanel" Margin="0,0,0,12" />
-
-					<TextBlock
-						Margin="0,0,0,6"
-						FontWeight="SemiBold"
-						Foreground="{DynamicResource PrimaryTextBrush}"
-						Text="Handle color" />
-					<WrapPanel x:Name="DockHandleColorPanel" Margin="0,0,0,10" />
-
-					<Grid Margin="0,0,0,12">
-						<Grid.ColumnDefinitions>
-							<ColumnDefinition Width="*" />
-							<ColumnDefinition Width="Auto" />
-						</Grid.ColumnDefinitions>
-						<StackPanel>
-							<TextBlock
-								FontWeight="SemiBold"
-								Foreground="{DynamicResource PrimaryTextBrush}"
-								Text="Handle transparency" />
-							<TextBlock
-								FontSize="12"
-								Foreground="{DynamicResource SecondaryTextBrush}"
-								Text="Lower values make the edge handle more see-through"
-								TextWrapping="Wrap" />
-						</StackPanel>
-						<StackPanel Grid.Column="1" Width="140" VerticalAlignment="Center">
-							<Slider
-								x:Name="DockHandleOpacitySlider"
-								Minimum="0.25"
-								Maximum="1"
-								TickFrequency="0.05"
-								IsSnapToTickEnabled="True"
-								ValueChanged="DockHandleOpacity_Changed" />
-							<TextBlock
-								x:Name="DockHandleOpacityLabel"
-								HorizontalAlignment="Right"
-								FontSize="12"
-								Foreground="{DynamicResource SecondaryTextBrush}"
-								Text="92%" />
-						</StackPanel>
-					</Grid>
-
-					<Grid Margin="0,0,0,10">
-						<Grid.ColumnDefinitions>
-							<ColumnDefinition Width="*" />
-							<ColumnDefinition Width="Auto" />
-						</Grid.ColumnDefinitions>
-						<StackPanel>
-							<TextBlock
-								FontWeight="SemiBold"
-								Foreground="{DynamicResource PrimaryTextBrush}"
-								Text="Always on top when docked" />
-							<TextBlock
-								FontSize="12"
-								Foreground="{DynamicResource SecondaryTextBrush}"
-								Text="Keeps the expanded window above other apps"
-								TextWrapping="Wrap" />
-						</StackPanel>
-						<ToggleButton
-							x:Name="AlwaysOnTopToggle"
-							Grid.Column="1"
-							VerticalAlignment="Center"
-							Checked="DesktopToggle_Changed"
-							Style="{StaticResource SwitchToggle}"
-							Unchecked="DesktopToggle_Changed" />
-					</Grid>
-
-					<Grid Margin="0,0,0,10">
-						<Grid.ColumnDefinitions>
-							<ColumnDefinition Width="*" />
-							<ColumnDefinition Width="Auto" />
-						</Grid.ColumnDefinitions>
-						<StackPanel>
-							<TextBlock
-								FontWeight="SemiBold"
-								Foreground="{DynamicResource PrimaryTextBrush}"
-								Text="Minimize to tray" />
-							<TextBlock
-								FontSize="12"
-								Foreground="{DynamicResource SecondaryTextBrush}"
-								Text="Close hides to the notification area when not docked"
-								TextWrapping="Wrap" />
-						</StackPanel>
-						<ToggleButton
-							x:Name="MinimizeToTrayToggle"
-							Grid.Column="1"
-							VerticalAlignment="Center"
-							Checked="DesktopToggle_Changed"
-							Style="{StaticResource SwitchToggle}"
-							Unchecked="DesktopToggle_Changed" />
-					</Grid>
-
-					<Grid Margin="0,0,0,10">
-						<Grid.ColumnDefinitions>
-							<ColumnDefinition Width="*" />
-							<ColumnDefinition Width="Auto" />
-						</Grid.ColumnDefinitions>
-						<StackPanel>
-							<TextBlock
-								FontWeight="SemiBold"
-								Foreground="{DynamicResource PrimaryTextBrush}"
-								Text="Global hotkey" />
-							<TextBlock
-								FontSize="12"
-								Foreground="{DynamicResource SecondaryTextBrush}"
-								Text="Ctrl+Shift+A shows or expands the window"
-								TextWrapping="Wrap" />
-						</StackPanel>
-						<ToggleButton
-							x:Name="GlobalHotkeyToggle"
-							Grid.Column="1"
-							VerticalAlignment="Center"
-							Checked="DesktopToggle_Changed"
-							Style="{StaticResource SwitchToggle}"
-							Unchecked="DesktopToggle_Changed" />
-					</Grid>
-
-					<Button
-						Margin="0,4,0,0"
-						Click="ExitApp_Click"
-						Content="Exit app"
-						Style="{StaticResource SecondaryButton}" />
-				</StackPanel>
-			</Border>
-
-			<TextBlock
-				Margin="4,8,0,8"
-				FontSize="12"
-				Foreground="{DynamicResource SecondaryTextBrush}"
-				Text="AUTO LOCK" />
-			<Border
-				Margin="0,0,0,12"
-				Padding="8"
-				Background="{DynamicResource CardBackgroundBrush}"
-				CornerRadius="16">
-				<StackPanel x:Name="AutoLockPanel" />
-			</Border>
-
-			<TextBlock
-				Margin="4,8,0,8"
-				FontSize="12"
-				Foreground="{DynamicResource SecondaryTextBrush}"
-				Text="EXPORT AND IMPORT" />
-			<Border
-				Padding="16"
-				Background="{DynamicResource CardBackgroundBrush}"
-				CornerRadius="16">
-				<StackPanel>
-					<TextBlock
-						Margin="0,0,0,12"
-						Foreground="{DynamicResource SecondaryTextBrush}"
-						Text="JSON backup is this app's format (v1). Warning: export writes secret keys and backup codes in plaintext — treat the file like a password. Secrets stay encrypted at rest in the database when an unlock method is set. Import adds accounts and folders; it never deletes existing data. Duplicates (same service, username, and secret) are skipped."
-						TextWrapping="Wrap" />
-					<Button
-						Margin="0,0,0,8"
-						Click="Export_Click"
-						Content="Export accounts"
-						Style="{StaticResource PrimaryButton}" />
-					<Button
-						Margin="0,0,0,16"
-						Click="Import_Click"
-						Content="Import JSON backup"
-						Style="{StaticResource SecondaryButton}" />
-
-					<TextBlock
-						Margin="0,0,0,8"
-						FontWeight="SemiBold"
-						Foreground="{DynamicResource PrimaryTextBrush}"
-						Text="Google Authenticator" />
-					<TextBlock
-						Margin="0,0,0,12"
-						Foreground="{DynamicResource SecondaryTextBrush}"
-						Text="Import from a Transfer accounts QR or otpauth-migration link. No Google sign-in. Only TOTP accounts are added; duplicates are skipped. If Google shows several QRs, import each one."
-						TextWrapping="Wrap" />
-					<Button
-						Margin="0,0,0,8"
-						Click="ImportGoogleCapture_Click"
-						Content="Capture Google QR"
-						Style="{StaticResource SecondaryButton}" />
-					<Button
-						Margin="0,0,0,8"
-						Click="ImportGoogleImage_Click"
-						Content="Decode Google QR image"
-						Style="{StaticResource SecondaryButton}" />
-					<TextBox
-						x:Name="GoogleMigrationBox"
-						Margin="0,0,0,8"
-						AcceptsReturn="True"
-						MinHeight="56"
-						TextWrapping="Wrap"
-						VerticalScrollBarVisibility="Auto"
-						Style="{StaticResource FieldBox}"
-						AutomationProperties.Name="Google migration URI" />
-					<Button
-						Click="ImportGoogleUri_Click"
-						Content="Import migration URI"
-						Style="{StaticResource SecondaryButton}" />
-
-					<TextBlock
-						x:Name="TransferStatus"
-						Margin="0,12,0,0"
-						Foreground="{DynamicResource PrimaryTextBrush}"
-						TextWrapping="Wrap" />
-				</StackPanel>
-			</Border>
-
-			<TextBlock
-				x:Name="AppVersionText"
-				Margin="0,8,0,0"
-				HorizontalAlignment="Center"
-				FontSize="12"
-				Foreground="{DynamicResource SecondaryTextBrush}"
-				Text="Authenticator" />
-		</StackPanel>
-	</ScrollViewer>
+				<syncfusion:GroupBarItem HeaderText="Export and import">
+					<StackPanel Margin="8">
+						<TextBlock Margin="0,0,0,12" Foreground="{DynamicResource SecondaryTextBrush}" Text="JSON backup is this app's format (v1). Warning: export writes secret keys and backup codes in plaintext — treat the file like a password. Secrets stay encrypted at rest in the database when an unlock method is set. Import adds accounts and folders; it never deletes existing data. Duplicates (same service, username, and secret) are skipped." TextWrapping="Wrap" />
+						<syncfusion:ButtonAdv Margin="0,0,0,8" Label="Export accounts" Click="Export_Click" SizeMode="Normal" />
+						<syncfusion:ButtonAdv Margin="0,0,0,16" Label="Import JSON backup" Click="Import_Click" SizeMode="Normal" />
+						<TextBlock Margin="0,0,0,8" FontWeight="SemiBold" Foreground="{DynamicResource PrimaryTextBrush}" Text="Google Authenticator" />
+						<TextBlock Margin="0,0,0,12" Foreground="{DynamicResource SecondaryTextBrush}" Text="Import from a Transfer accounts QR or otpauth-migration link. No Google sign-in. Only TOTP accounts are added; duplicates are skipped. If Google shows several QRs, import each one." TextWrapping="Wrap" />
+						<syncfusion:ButtonAdv Margin="0,0,0,8" Label="Capture Google QR" Click="ImportGoogleCapture_Click" SizeMode="Normal" />
+						<syncfusion:ButtonAdv Margin="0,0,0,8" Label="Decode Google QR image" Click="ImportGoogleImage_Click" SizeMode="Normal" />
+						<TextBox x:Name="GoogleMigrationBox" Margin="0,0,0,8" AcceptsReturn="True" MinHeight="56" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" Style="{StaticResource FieldBox}" AutomationProperties.Name="Google migration URI" />
+						<syncfusion:ButtonAdv Label="Import migration URI" Click="ImportGoogleUri_Click" SizeMode="Normal" />
+						<TextBlock x:Name="TransferStatus" Margin="0,12,0,0" Foreground="{DynamicResource PrimaryTextBrush}" TextWrapping="Wrap" />
+					</StackPanel>
+				</syncfusion:GroupBarItem>
+			</syncfusion:GroupBar>
+		</ScrollViewer>
+	</DockPanel>
 </UserControl>

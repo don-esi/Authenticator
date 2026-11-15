@@ -30,6 +30,7 @@ public partial class AddAccountWindow : Window
         _existing = existing;
         _folderId = existing?.FolderId ?? defaultFolderId;
         InitializeComponent();
+        SyncfusionBootstrap.ApplyTo(this);
 
         if (existing is null)
             return;

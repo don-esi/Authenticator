@@ -1,7 +1,5 @@
 using Authenticator.Logging;
 using Microsoft.EntityFrameworkCore;
-using System;
-using System.Threading.Tasks;
 
 namespace Authenticator.Data;
 
@@ -11,7 +9,8 @@ namespace Authenticator.Data;
 public static class DatabaseInitializer
 {
     /// <summary>
-    /// Ensures the database is created and migrated to the latest version
+    /// Ensures the database is created and migrated to the latest version.
+    /// Heavy EnsureCreated/ALTER/schema work is skipped when the local schema checkpoint matches.
     /// </summary>
     public static async Task InitializeDatabaseAsync()
     {
@@ -19,7 +18,17 @@ public static class DatabaseInitializer
 
         try
         {
-            using var context = new AuthenticatorDbContext();
+            await using var context = new AuthenticatorDbContext();
+
+            if (SchemaCheckpoint.IsCurrent())
+            {
+                // Fast path: DB already provisioned for this server/database/schema version.
+                await EnsureDefaultSettingsAsync(context);
+                LoggingConfiguration.LogInfo(
+                    "Database initialization skipped heavy schema work (checkpoint current).",
+                    nameof(DatabaseInitializer));
+                return;
+            }
 
             // Create database if it doesn't exist based on the model
             // Note: EnsureCreatedAsync does not use migrations. For production apps,
@@ -29,9 +38,12 @@ public static class DatabaseInitializer
 
             await EnsureBackupCodeColumnWidthAsync(context);
             await EnsureDockHandleOffsetColumnAsync(context);
+            await EnsureVaultSchemaAsync(context);
 
             // Ensure at least one AppSettings record exists
             await EnsureDefaultSettingsAsync(context);
+
+            SchemaCheckpoint.MarkCurrent();
             LoggingConfiguration.LogInfo("Database initialization finished successfully.", nameof(DatabaseInitializer));
         }
         catch (Exception ex)
@@ -92,9 +104,15 @@ public static class DatabaseInitializer
         }
     }
 
+    private static async Task EnsureVaultSchemaAsync(AuthenticatorDbContext context)
+    {
+        // Mirror VaultMigrationService table ensures for existing installs (EnsureCreated won't alter).
+        await new Services.VaultMigrationService().EnsureSchemaOnlyAsync();
+    }
+
     private static async Task EnsureDefaultSettingsAsync(AuthenticatorDbContext context)
     {
-        var settings = await context.AppSettings.FirstOrDefaultAsync();
+        var settings = await context.AppSettings.AsNoTracking().FirstOrDefaultAsync();
         if (settings == null)
         {
             LoggingConfiguration.LogInfo("No AppSettings record found. Creating default settings.", nameof(DatabaseInitializer));

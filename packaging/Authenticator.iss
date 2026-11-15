@@ -1,4 +1,4 @@
-; Authenticator Setup — elevated Inno installer with SQL Server Express bootstrap.
+; Authenticator Setup — elevated Inno installer with SQL Server Express bootstrap (Host) or LAN Join.
 ; Compile via packaging\build-setup.ps1 (requires Inno Setup 6.4+ / 7 for DownloadTemporaryFile).
 
 #ifndef MyAppVersion
@@ -51,10 +51,14 @@ Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#MyAppName}}
 
 [Code]
 const
-  { SQL Server 2022 Express Core offline media (~280 MB). Prefer this over SSEI web links (they 404 / drift). }
   SqlExpressDownloadUrl =
     'https://download.microsoft.com/download/3/8/d/38de7036-2433-4207-8eae-06e247e17b25/SQLEXPR_x64_ENU.exe';
   SqlExpressPackage = 'SQLEXPR_x64_ENU.exe';
+
+var
+  RolePage: TInputOptionWizardPage;
+  InstallRole: Integer; { 0 = Host, 1 = Join, 2 = Local only }
+  SharedServerOverride: String;
 
 function RegGetSqlInstanceNames(RootKey: Integer; var Names: TArrayOfString): Boolean;
 begin
@@ -90,13 +94,11 @@ begin
     Result := SqlServiceInstalled('MSSQL$SQLEXPRESS');
 end;
 
-{ True when any SQL Server engine instance is installed (default or named) or its service exists. }
 function AnySqlServerPresent: Boolean;
 var
   Names: TArrayOfString;
 begin
   Result := False;
-
   if RegGetSqlInstanceNames(HKLM64, Names) and (GetArrayLength(Names) > 0) then
   begin
     Result := True;
@@ -107,14 +109,10 @@ begin
     Result := True;
     Exit;
   end;
-
-  { Services still count when Instance Names is missing/incomplete. }
-  if SqlServiceInstalled('MSSQLSERVER')
-     or SqlServiceInstalled('MSSQL$SQLEXPRESS') then
+  if SqlServiceInstalled('MSSQLSERVER') or SqlServiceInstalled('MSSQL$SQLEXPRESS') then
     Result := True;
 end;
 
-{ Prefer SQLEXPRESS, else first named instance, else default instance "." }
 function ResolveSqlServerForConfig: String;
 var
   Names: TArrayOfString;
@@ -160,9 +158,31 @@ begin
   Result := '.\\SQLEXPRESS';
 end;
 
+function ComputerHostName: String;
+var
+  N: String;
+begin
+  N := GetComputerNameString;
+  if N = '' then
+    N := 'localhost';
+  Result := N;
+end;
+
+function SharedServerForHost: String;
+begin
+  Result := ComputerHostName + '\\SQLEXPRESS';
+end;
+
+function JsonEscape(const S: String): String;
+begin
+  Result := S;
+  StringChangeEx(Result, '\', '\\', True);
+  StringChangeEx(Result, '"', '\"', True);
+end;
+
 function WriteConnectionJson: Boolean;
 var
-  Dir, Path, Json, Server: String;
+  Dir, Path, Json, LocalServer, SharedServer, RoleName, Active, Discovered: String;
 begin
   Dir := ExpandConstant('{localappdata}\Authenticator');
   if not ForceDirectories(Dir) then
@@ -180,15 +200,53 @@ begin
     Exit;
   end;
 
-  Server := ResolveSqlServerForConfig;
+  LocalServer := ResolveSqlServerForConfig;
+  if SharedServerOverride <> '' then
+    SharedServer := SharedServerOverride
+  else if InstallRole = 0 then
+    SharedServer := SharedServerForHost
+  else if InstallRole = 1 then
+    SharedServer := SharedServerForHost { placeholder; app discovery will replace }
+  else
+    SharedServer := LocalServer;
+
+  if InstallRole = 0 then
+  begin
+    RoleName := 'Host';
+    Active := 'Shared';
+  end
+  else if InstallRole = 1 then
+  begin
+    RoleName := 'Join';
+    Active := 'Shared';
+  end
+  else
+  begin
+    RoleName := 'Local';
+    Active := 'Local';
+  end;
+
+  if InstallRole = 1 then
+    Discovered := 'true'
+  else
+    Discovered := 'false';
+
   Json :=
     '{' + #13#10 +
-    '  "Server": "' + Server + '",' + #13#10 +
+    '  "activeProfile": "' + Active + '",' + #13#10 +
+    '  "role": "' + RoleName + '",' + #13#10 +
+    '  "profiles": [' + #13#10 +
+    '    { "name": "Local", "server": "' + JsonEscape(LocalServer) + '", "database": "Authenticator" },' + #13#10 +
+    '    { "name": "Shared", "server": "' + JsonEscape(SharedServer) + '", "database": "Authenticator", "discovered": ' +
+      Discovered + ' }' + #13#10 +
+    '  ],' + #13#10 +
+    '  "discovery": { "udpPort": 38455 },' + #13#10 +
+    '  "Server": "' + JsonEscape(SharedServer) + '",' + #13#10 +
     '  "Database": "Authenticator"' + #13#10 +
     '}';
   Result := SaveStringToFile(Path, Json, False);
   if Result then
-    Log('Wrote ' + Path + ' (Server=' + Server + ')')
+    Log('Wrote ' + Path + ' (role=' + RoleName + ', Shared=' + SharedServer + ')')
   else
     Log('Failed to write ' + Path);
 end;
@@ -211,7 +269,6 @@ begin
     MsgBox(
       'Could not download SQL Server Express.' + #13#10 + #13#10 +
       'Install SQL Server Express (instance name SQLEXPRESS) manually, then re-run Setup.' + #13#10 + #13#10 +
-      'https://www.microsoft.com/en-us/sql-server/sql-server-downloads' + #13#10 + #13#10 +
       GetExceptionMessage,
       mbError,
       MB_OK);
@@ -245,6 +302,7 @@ begin
   Args :=
     '/Q /ACTION=Install /FEATURES=SQLENGINE /INSTANCENAME=SQLEXPRESS /INSTANCEID=SQLEXPRESS ' +
     '/IACCEPTSQLSERVERLICENSETERMS /UPDATEENABLED=0 /UpdateEnabled=0 ' +
+    '/TCPENABLED=1 /NPENABLED=1 ' +
     '/SQLSYSADMINACCOUNTS="Builtin\Administrators" ' +
     '/AGTSVCACCOUNT="NT AUTHORITY\NETWORK SERVICE" /SQLSVCACCOUNT="NT AUTHORITY\NETWORK SERVICE"';
 
@@ -254,7 +312,6 @@ begin
     Exit;
   end;
 
-  { 0 = success; 3010 = success, reboot required }
   if (ResultCode <> 0) and (ResultCode <> 3010) and (not SqlExpressInstanceExists) then
   begin
     MsgBox(
@@ -278,20 +335,78 @@ begin
   Result := True;
 end;
 
+function EnableSqlFirewallRules: Boolean;
+var
+  ResultCode: Integer;
+begin
+  { Best-effort firewall openings for shared host. }
+  Exec('netsh', 'advfirewall firewall add rule name="Authenticator SQL TCP 1433" dir=in action=allow protocol=TCP localport=1433', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Exec('netsh', 'advfirewall firewall add rule name="Authenticator SQL Browser 1434" dir=in action=allow protocol=UDP localport=1434', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Exec('netsh', 'advfirewall firewall add rule name="Authenticator SQL Discovery 38455" dir=in action=allow protocol=UDP localport=38455', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Result := True;
+end;
+
+procedure InitializeWizard;
+begin
+  InstallRole := 0;
+  SharedServerOverride := '';
+  RolePage := CreateInputOptionPage(
+    wpSelectTasks,
+    'Shared vault role',
+    'How should this PC use SQL Express?',
+    'Host installs/configures a shared SQL Express instance other machines can discover. Join skips Express and finds a host on the LAN (or enter a server in Settings). Local-only keeps a private Express instance.',
+    True,
+    False);
+  RolePage.Add('Host shared vault on this PC (install/configure SQL Express)');
+  RolePage.Add('Join existing shared vault on the LAN (skip SQL Express install)');
+  RolePage.Add('Local only (this PC; classic single-machine)');
+  RolePage.Values[0] := True;
+end;
+
+function NextButtonClick(CurPageID: Integer): Boolean;
+begin
+  Result := True;
+  if CurPageID = RolePage.ID then
+  begin
+    if RolePage.Values[0] then InstallRole := 0
+    else if RolePage.Values[1] then InstallRole := 1
+    else InstallRole := 2;
+  end;
+end;
+
 function PrepareToInstall(var NeedsRestart: Boolean): String;
 begin
   Result := '';
   NeedsRestart := False;
 
-  if AnySqlServerPresent then
+  { Join role: never install Express. }
+  if InstallRole = 1 then
   begin
-    Log('SQL Server already installed/present (instance or service); skipping Express download/install.');
+    Log('Join role selected; skipping SQL Express download/install. Discovery happens in-app.');
     Exit;
   end;
 
-  Log('No local SQL Server found; downloading and installing SQL Server Express (SQLEXPRESS).');
+  if AnySqlServerPresent then
+  begin
+    Log('SQL Server already installed/present; skipping Express download/install.');
+    if InstallRole = 0 then
+      EnableSqlFirewallRules;
+    Exit;
+  end;
+
+  if InstallRole = 2 then
+    Log('Local-only role: installing SQL Express if missing.');
+  else
+    Log('Host role: downloading and installing SQL Server Express (SQLEXPRESS).');
+
   if not InstallSqlExpress then
-    Result := 'SQL Server Express (SQLEXPRESS) is required and could not be installed.';
+  begin
+    Result := 'SQL Server Express (SQLEXPRESS) is required for this role and could not be installed.';
+    Exit;
+  end;
+
+  if InstallRole = 0 then
+    EnableSqlFirewallRules;
 end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
@@ -301,7 +416,7 @@ begin
     if not WriteConnectionJson then
       MsgBox(
         'App files were installed, but connection.json could not be written under LocalAppData.' + #13#10 +
-        'Create %LocalAppData%\Authenticator\connection.json pointing at .\SQLEXPRESS.',
+        'Create %LocalAppData%\Authenticator\connection.json or use Settings → Connection.',
         mbError,
         MB_OK);
   end;

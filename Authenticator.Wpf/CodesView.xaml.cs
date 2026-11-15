@@ -32,6 +32,7 @@ public partial class CodesView : UserControl
     private CodesViewMode _viewMode = CodesViewMode.Condensed;
     private AppThemeMode _themeMode = AppThemeMode.System;
     private bool _codesMasked;
+    private bool _favoritesOnly;
 
     private Border? _slideFront;
     private TranslateTransform? _slideTransform;
@@ -52,7 +53,8 @@ public partial class CodesView : UserControl
         ApplyViewMode();
         _codeTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
         _codeTimer.Tick += (_, _) => RefreshCodes();
-        _progressTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(50) };
+        // 50ms caused UI-thread thrash (PropertyChanged + ProgressBar MultiBinding per row).
+        _progressTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(200) };
         _progressTimer.Tick += (_, _) => UpdateProgress();
         _toastTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(1400) };
         _toastTimer.Tick += (_, _) => HideStatusToast();
@@ -92,6 +94,12 @@ public partial class CodesView : UserControl
         _codesMasked = masked;
         foreach (var row in _rows)
             ApplyDisplayCode(row);
+    }
+
+    public void SetFavoritesFilter(bool favoritesOnly)
+    {
+        _favoritesOnly = favoritesOnly;
+        ApplyFilter();
     }
 
     public void RefreshCodes()
@@ -195,7 +203,6 @@ public partial class CodesView : UserControl
 
     private void SearchBox_TextChanged(object sender, TextChangedEventArgs e)
     {
-        SearchHint.Visibility = string.IsNullOrEmpty(SearchBox.Text) ? Visibility.Visible : Visibility.Collapsed;
         ApplyFilter();
         RefreshCodes();
     }
@@ -221,6 +228,9 @@ public partial class CodesView : UserControl
                 // Main page: only accounts that are not already in a folder.
                 return false;
             }
+
+            if (_favoritesOnly && !account.IsFavorite)
+                return false;
 
             if (query.Length == 0)
                 return true;
@@ -297,7 +307,10 @@ public partial class CodesView : UserControl
         {
             Orientation = Orientation.Horizontal,
             HorizontalAlignment = HorizontalAlignment.Right,
-            VerticalAlignment = VerticalAlignment.Stretch
+            VerticalAlignment = VerticalAlignment.Stretch,
+            Opacity = 0,
+            IsHitTestVisible = false,
+            Tag = "SlideActions"
         };
         actions.Children.Add(MakeSlideActionButton(
             "\uE70F", "#9CA3AF", "Edit folder", folder, FolderEdit_Click, marginRight: 4));
@@ -767,6 +780,38 @@ public partial class CodesView : UserControl
         // DataTemplate Freezables can be shared/frozen; give each row a mutable transform.
         border.RenderTransform = new TranslateTransform();
         border.Tag = new SlideTarget(SlideKind.Account, null, AccountActionWidth);
+        SetSlideActionsVisible(border, visible: false);
+    }
+
+    /// <summary>
+    /// Slide-action buttons sit behind a CornerRadius Border. Those corners are transparent, so the
+    /// buttons must stay invisible until the front is actually sliding / open.
+    /// </summary>
+    private static void SetSlideActionsVisible(Border front, bool visible)
+    {
+        if (FindSlideActions(front) is not { } actions)
+            return;
+
+        actions.Opacity = visible ? 1 : 0;
+        actions.IsHitTestVisible = visible;
+    }
+
+    private static FrameworkElement? FindSlideActions(Border front)
+    {
+        if (VisualTreeHelper.GetParent(front) is not Panel host)
+            return null;
+
+        FrameworkElement? fallback = null;
+        foreach (UIElement child in host.Children)
+        {
+            if (ReferenceEquals(child, front) || child is not FrameworkElement fe)
+                continue;
+            if (fe.Tag is "SlideActions")
+                return fe;
+            fallback ??= fe;
+        }
+
+        return fallback;
     }
 
     private void Slide_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
@@ -819,7 +864,10 @@ public partial class CodesView : UserControl
         var current = e.GetPosition(this);
         var dx = current.X - _slideStart.X;
         if (Math.Abs(dx) > 4)
+        {
             _slideMoved = true;
+            SetSlideActionsVisible(_slideFront, visible: true);
+        }
 
         _slideTransform.X = Math.Clamp(_slideOriginX + dx, -_slideActionWidth, 0);
         e.Handled = true;
@@ -855,6 +903,7 @@ public partial class CodesView : UserControl
         transform.X = open ? -width : 0;
         if (!open)
         {
+            SetSlideActionsVisible(front, visible: false);
             _slideFront = null;
             _slideTransform = null;
         }
@@ -871,6 +920,7 @@ public partial class CodesView : UserControl
         _slideTransform.X = open ? -_slideActionWidth : 0;
         if (!open)
         {
+            SetSlideActionsVisible(_slideFront, visible: false);
             _slideFront = null;
             _slideTransform = null;
         }
@@ -878,6 +928,8 @@ public partial class CodesView : UserControl
 
     private void CloseOpenSlide()
     {
+        if (_slideFront is not null)
+            SetSlideActionsVisible(_slideFront, visible: false);
         if (_slideTransform is { IsFrozen: false })
             _slideTransform.X = 0;
         _slideFront = null;
@@ -919,7 +971,8 @@ public sealed class AccountCardRow : INotifyPropertyChanged
         get => _secondsRemaining;
         set
         {
-            if (Math.Abs(_secondsRemaining - value) < 0.001)
+            // Ignore sub-pixel churn so progress ticks don't flood layout.
+            if (Math.Abs(_secondsRemaining - value) < 0.08)
                 return;
             _secondsRemaining = value;
             OnPropertyChanged(nameof(SecondsRemaining));

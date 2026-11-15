@@ -27,6 +27,7 @@ public partial class FolderWindow : Window
     {
         _existing = existing;
         InitializeComponent();
+        SyncfusionBootstrap.ApplyTo(this);
         AccountList.ItemsSource = _visibleRows;
 
         if (existing is null)

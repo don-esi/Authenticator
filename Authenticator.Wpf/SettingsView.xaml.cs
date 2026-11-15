@@ -6,6 +6,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Threading;
+using Authenticator.Data;
 using Authenticator.Data.Models;
 using Authenticator.Logging;
 using Authenticator.Services;
@@ -103,6 +104,8 @@ public partial class SettingsView : UserControl
             BuildLockOptions();
             LockMethodStatus.Text = string.Empty;
             AppVersionText.Text = $"Authenticator {GetAppVersion()}";
+            RefreshConnectionUi();
+            RefreshUnlockSummary();
         }
         catch (Exception ex)
         {
@@ -113,6 +116,139 @@ public partial class SettingsView : UserControl
         {
             _loading = false;
         }
+    }
+
+    private void RefreshConnectionUi()
+    {
+        var active = ConnectionConfig.ActiveProfile;
+        ConnectionStatusText.Text =
+            $"Active: {ConnectionConfig.ActiveProfileName} → {active.Server} / {active.Database}" +
+            (ConnectionConfig.IsOfflineMode ? " (OFFLINE)" : "");
+        ConnectionSummaryText.Text =
+            $"{ConnectionConfig.Role} · {ConnectionConfig.ActiveProfileName} · {active.Server}" +
+            (ConnectionConfig.IsOfflineMode ? " · OFFLINE" : "");
+        ProfileCombo.Items.Clear();
+        foreach (var p in ConnectionConfig.Profiles)
+            ProfileCombo.Items.Add(p.Name);
+        ProfileCombo.SelectedItem = ConnectionConfig.ActiveProfileName;
+        ServerBox.Text = active.Server;
+        DatabaseBox.Text = active.Database;
+        foreach (ComboBoxItem item in RoleCombo.Items)
+        {
+            if (string.Equals(item.Tag?.ToString(), ConnectionConfig.Role.ToString(), StringComparison.OrdinalIgnoreCase))
+            {
+                RoleCombo.SelectedItem = item;
+                break;
+            }
+        }
+    }
+
+    private void RefreshUnlockSummary()
+    {
+        var credentials = _lockStore.Load();
+        var parts = new List<string>();
+        if (credentials.PinEnabled) parts.Add("PIN");
+        if (credentials.YubiKeyEnabled) parts.Add("YubiKey");
+        if (credentials.HelloUnlockEnabled) parts.Add("Hello");
+        UnlockSummaryText.Text = parts.Count == 0 ? "No unlock method set" : string.Join(" · ", parts);
+    }
+
+    private void ProfileCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_loading || ProfileCombo.SelectedItem is not string name)
+            return;
+        var profile = ConnectionConfig.Profiles.FirstOrDefault(p => p.Name == name);
+        if (profile is null) return;
+        ServerBox.Text = profile.Server;
+        DatabaseBox.Text = profile.Database;
+    }
+
+    private void SaveConnection_Click(object sender, RoutedEventArgs e)
+    {
+        var name = ProfileCombo.SelectedItem as string ?? ConnectionConfig.SharedProfileName;
+        ConnectionConfig.UpsertProfile(new ConnectionProfile
+        {
+            Name = name,
+            Server = ServerBox.Text.Trim(),
+            Database = string.IsNullOrWhiteSpace(DatabaseBox.Text) ? "Authenticator" : DatabaseBox.Text.Trim()
+        });
+        ConnectionConfig.SetActiveProfile(name);
+        if (RoleCombo.SelectedItem is ComboBoxItem roleItem &&
+            Enum.TryParse<ConnectionRole>(roleItem.Tag?.ToString(), true, out var role))
+            ConnectionConfig.SetRole(role);
+        ConnectionActionStatus.Text = "Saved. Restart or unlock to refresh DB connection.";
+        RefreshConnectionUi();
+    }
+
+    private async void TestConnection_Click(object sender, RoutedEventArgs e)
+    {
+        ConnectionActionStatus.Text = "Testing…";
+        var ok = await ConnectionConfig.TestConnectionAsync(ServerBox.Text.Trim(), DatabaseBox.Text.Trim());
+        ConnectionActionStatus.Text = ok ? "Connection OK." : "Connection failed.";
+        await SharedConnectionMonitor.Instance.RefreshAsync();
+        RefreshConnectionUi();
+    }
+
+    private async void Discover_Click(object sender, RoutedEventArgs e)
+    {
+        ConnectionActionStatus.Text = "Discovering on LAN…";
+        var found = await SqlDiscoveryService.ProbeAsync();
+        DiscoveryList.ItemsSource = found.ToList();
+        ConnectionActionStatus.Text = found.Count == 0
+            ? "No hosts found. Check firewall UDP 38455 or enter server manually."
+            : $"Found {found.Count}. Double-click a row to apply.";
+    }
+
+    private void DiscoveryList_DoubleClick(object sender, System.Windows.Input.MouseButtonEventArgs e)
+    {
+        if (DiscoveryList.SelectedItem is not SqlDiscoveryAdvertisement ad
+            || string.IsNullOrWhiteSpace(ad.Server))
+            return;
+
+        ServerBox.Text = ad.Server;
+        DatabaseBox.Text = string.IsNullOrWhiteSpace(ad.Database) ? "Authenticator" : ad.Database;
+        ConnectionConfig.UpsertProfile(new ConnectionProfile
+        {
+            Name = ConnectionConfig.SharedProfileName,
+            Server = ad.Server,
+            Database = DatabaseBox.Text,
+            Discovered = true
+        });
+        ConnectionConfig.SetActiveProfile(ConnectionConfig.SharedProfileName);
+        ConnectionConfig.SetRole(ConnectionRole.Join);
+        if (!string.IsNullOrWhiteSpace(ad.VdekFingerprintPrefix))
+            ConnectionConfig.SetFingerprintPrefix(ad.VdekFingerprintPrefix);
+        ConnectionActionStatus.Text = $"Applied discovered host {ad.Server}.";
+        RefreshConnectionUi();
+    }
+
+    private async void EnrollRecovery_Click(object sender, RoutedEventArgs e)
+    {
+        var key = RecoveryKeyBox.Text.Trim();
+        if (string.IsNullOrWhiteSpace(key))
+        {
+            ConnectionActionStatus.Text = "Enter recovery key.";
+            return;
+        }
+
+        var ok = await new VaultCryptoService().EnrollWithRecoveryKeyAsync(key);
+        ConnectionActionStatus.Text = ok
+            ? "VDEK enrolled in session. Set/confirm PIN or Hello while unlocked to wrap for this machine."
+            : "Enrollment failed (wrong key or VaultCrypto missing).";
+    }
+
+    private async void ReconcileOffline_Click(object sender, RoutedEventArgs e)
+    {
+        await SharedConnectionMonitor.Instance.RefreshAsync();
+        if (ConnectionConfig.IsOfflineMode)
+        {
+            ConnectionActionStatus.Text = "Still offline.";
+            return;
+        }
+
+        var n = await new OfflineVaultService().ReconcileToSharedAsync();
+        ConnectionActionStatus.Text = $"Reconciled {n} queued change(s).";
+        RefreshConnectionUi();
     }
 
     private void RefreshUnlockMethodUi()
@@ -139,6 +275,7 @@ public partial class SettingsView : UserControl
         HelloStatusText.Text = credentials.HelloUnlockEnabled ? "Windows Hello: enabled" : "Windows Hello: not enabled";
         EnableHelloButton.IsEnabled = _helloAvailable && !credentials.HelloUnlockEnabled;
         ClearHelloButton.IsEnabled = credentials.HelloUnlockEnabled;
+        RefreshUnlockSummary();
     }
 
     private void BuildThemeOptions()

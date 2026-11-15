@@ -51,6 +51,16 @@ public sealed class CodesUiPreferencesState
 
     /// <summary>Dock edge handle opacity (0.2–1.0).</summary>
     public double DockHandleOpacity { get; set; } = 0.92;
+
+    /// <summary>
+    /// Local mirror of AppSettings dock side so MainWindow can position before SQL loads
+    /// (avoids CenterScreen → dock jump on startup).
+    /// </summary>
+    public string WindowDockPosition { get; set; } = "None";
+
+    public bool IsWindowCollapsed { get; set; }
+
+    public int WindowDockHandleOffsetY { get; set; } = 120;
 }
 
 /// <summary>

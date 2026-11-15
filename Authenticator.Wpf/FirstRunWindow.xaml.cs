@@ -25,6 +25,7 @@ public partial class FirstRunWindow : Window
     public FirstRunWindow()
     {
         InitializeComponent();
+        SyncfusionBootstrap.ApplyTo(this);
         Loaded += async (_, _) => await InitializeAsync();
     }
 

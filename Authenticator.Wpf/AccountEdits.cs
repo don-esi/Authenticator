@@ -84,11 +84,17 @@ internal static class AccountEdits
         return BrushFromHex(InitialColors[index]);
     }
 
+    private static readonly Dictionary<string, SolidColorBrush> BrushCache = new(StringComparer.OrdinalIgnoreCase);
+
     public static SolidColorBrush BrushFromHex(string hex)
     {
+        if (BrushCache.TryGetValue(hex, out var cached))
+            return cached;
+
         var color = (Color)ColorConverter.ConvertFromString(hex);
         var brush = new SolidColorBrush(color);
         brush.Freeze();
+        BrushCache[hex] = brush;
         return brush;
     }
 

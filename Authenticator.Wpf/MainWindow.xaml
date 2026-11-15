@@ -3,13 +3,16 @@
 	xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
 	xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
 	xmlns:local="clr-namespace:Authenticator"
+	xmlns:syncfusion="http://schemas.syncfusion.com/wpf"
+	xmlns:syncfusionskin="clr-namespace:Syncfusion.SfSkinManager;assembly=Syncfusion.SfSkinManager.WPF"
 	Title="Authenticator"
+	syncfusionskin:SfSkinManager.Theme="{syncfusionskin:SkinManagerExtension ThemeName=Windows11Light}"
 	Width="420"
 	Height="900"
 	MinWidth="420"
 	MinHeight="640"
 	Icon="pack://application:,,,/Assets/app.ico"
-	Background="{DynamicResource PageBackgroundBrush}"
+	Background="White"
 	Foreground="{DynamicResource PrimaryTextBrush}"
 	Activated="Window_Activated"
 	Deactivated="Window_Deactivated"
@@ -21,21 +24,63 @@
 	PreviewKeyDown="Window_PreviewActivity"
 	PreviewMouseDown="Window_PreviewActivity"
 	PreviewMouseWheel="Window_PreviewActivity"
-	WindowStartupLocation="CenterScreen">
-	<Grid>
+	WindowStartupLocation="Manual">
+	<Grid Background="{DynamicResource PageBackgroundBrush}">
 		<Grid.RowDefinitions>
+			<RowDefinition Height="Auto" />
+			<RowDefinition Height="Auto" />
 			<RowDefinition Height="*" />
 			<RowDefinition Height="Auto" />
 		</Grid.RowDefinitions>
 
-		<Grid x:Name="PageHost" Grid.Row="0">
+		<!-- Top tabs -->
+		<Border
+			Grid.Row="0"
+			Padding="8,6"
+			Background="{DynamicResource NavBarBackgroundBrush}"
+			BorderBrush="{DynamicResource BorderBrushColor}"
+			BorderThickness="0,0,0,1">
+			<Grid>
+				<Grid.ColumnDefinitions>
+					<ColumnDefinition Width="*" />
+					<ColumnDefinition Width="*" />
+					<ColumnDefinition Width="Auto" />
+				</Grid.ColumnDefinitions>
+				<Button
+					x:Name="TopCodesTab"
+					Click="TopCodesTab_Click"
+					Style="{StaticResource TextActionButton}"
+					Content="2FA Codes" />
+				<Button
+					x:Name="TopVaultTab"
+					Grid.Column="1"
+					Click="TopVaultTab_Click"
+					Foreground="{DynamicResource SecondaryTextBrush}"
+					Style="{StaticResource TextActionButton}"
+					Content="Vault" />
+				<TextBlock
+					x:Name="OfflineBadge"
+					Grid.Column="2"
+					Margin="8,0,4,0"
+					VerticalAlignment="Center"
+					FontSize="11"
+					FontWeight="SemiBold"
+					Foreground="{DynamicResource DangerBrush}"
+					Text="OFFLINE"
+					Visibility="Collapsed" />
+			</Grid>
+		</Border>
+
+		<Grid x:Name="PageHost" Grid.Row="2">
 			<local:CodesView x:Name="CodesPage" />
 			<local:BackupView x:Name="BackupPage" Visibility="Collapsed" />
+			<local:VaultView x:Name="VaultPage" Visibility="Collapsed" />
 			<local:SettingsView x:Name="SettingsPage" Visibility="Collapsed" />
 		</Grid>
 
+		<!-- Contextual bottom bar -->
 		<Border
-			Grid.Row="1"
+			Grid.Row="3"
 			Padding="8,6"
 			Background="{DynamicResource NavBarBackgroundBrush}"
 			BorderBrush="{DynamicResource BorderBrushColor}"
@@ -43,70 +88,65 @@
 			<Grid>
 				<Grid.ColumnDefinitions>
 					<ColumnDefinition Width="*" />
-					<ColumnDefinition Width="*" />
-					<ColumnDefinition Width="*" />
 					<ColumnDefinition Width="Auto" />
 				</Grid.ColumnDefinitions>
-				<Button
-					x:Name="CodesNavButton"
-					Grid.Column="0"
-					AutomationProperties.Name="2FA Codes"
-					Click="CodesNav_Click"
-					Style="{StaticResource TextActionButton}">
-					<StackPanel>
-						<TextBlock
-							HorizontalAlignment="Center"
-							FontFamily="Segoe MDL2 Assets"
-							FontSize="18"
-							Text="&#xE192;" />
-						<TextBlock
-							HorizontalAlignment="Center"
-							FontSize="12"
-							Text="2FA Codes" />
-					</StackPanel>
-				</Button>
-				<Button
-					x:Name="BackupNavButton"
-					Grid.Column="1"
-					AutomationProperties.Name="Backup Codes"
-					Click="BackupNav_Click"
-					Foreground="{DynamicResource SecondaryTextBrush}"
-					Style="{StaticResource TextActionButton}">
-					<StackPanel>
-						<TextBlock
-							HorizontalAlignment="Center"
-							FontFamily="Segoe MDL2 Assets"
-							FontSize="18"
-							Text="&#xE72C;" />
-						<TextBlock
-							HorizontalAlignment="Center"
-							FontSize="12"
-							Text="Backup Codes" />
-					</StackPanel>
-				</Button>
-				<Button
-					x:Name="SettingsNavButton"
-					Grid.Column="2"
-					AutomationProperties.Name="Settings"
-					Click="SettingsNav_Click"
-					Foreground="{DynamicResource SecondaryTextBrush}"
-					Style="{StaticResource TextActionButton}">
-					<StackPanel>
-						<TextBlock
-							HorizontalAlignment="Center"
-							FontFamily="Segoe MDL2 Assets"
-							FontSize="18"
-							Text="&#xE713;" />
-						<TextBlock
-							HorizontalAlignment="Center"
-							FontSize="12"
-							Text="Settings" />
-					</StackPanel>
-				</Button>
-				<StackPanel
-					Grid.Column="3"
-					Orientation="Horizontal"
-					VerticalAlignment="Center">
+				<StackPanel x:Name="CodesContextBar" Orientation="Horizontal">
+					<Button x:Name="CodesNavButton" Click="CodesNav_Click" Style="{StaticResource TextActionButton}" Margin="0,0,4,0">
+						<StackPanel>
+							<TextBlock HorizontalAlignment="Center" FontFamily="Segoe MDL2 Assets" FontSize="16" Text="&#xE192;" />
+							<TextBlock HorizontalAlignment="Center" FontSize="11" Text="Codes" />
+						</StackPanel>
+					</Button>
+					<Button x:Name="BackupNavButton" Click="BackupNav_Click" Foreground="{DynamicResource SecondaryTextBrush}" Style="{StaticResource TextActionButton}" Margin="0,0,4,0">
+						<StackPanel>
+							<TextBlock HorizontalAlignment="Center" FontFamily="Segoe MDL2 Assets" FontSize="16" Text="&#xE72C;" />
+							<TextBlock HorizontalAlignment="Center" FontSize="11" Text="Backup" />
+						</StackPanel>
+					</Button>
+					<Button x:Name="CodesFavoritesButton" Click="CodesFavorites_Click" Foreground="{DynamicResource SecondaryTextBrush}" Style="{StaticResource TextActionButton}" Margin="0,0,4,0">
+						<StackPanel>
+							<TextBlock HorizontalAlignment="Center" FontFamily="Segoe MDL2 Assets" FontSize="16" Text="&#xE734;" />
+							<TextBlock HorizontalAlignment="Center" FontSize="11" Text="Favorites" />
+						</StackPanel>
+					</Button>
+				</StackPanel>
+				<StackPanel x:Name="VaultContextBar" Orientation="Horizontal" Visibility="Collapsed">
+					<Button Click="VaultAll_Click" Style="{StaticResource TextActionButton}" Margin="0,0,4,0">
+						<StackPanel>
+							<TextBlock HorizontalAlignment="Center" FontFamily="Segoe MDL2 Assets" FontSize="16" Text="&#xE8F1;" />
+							<TextBlock HorizontalAlignment="Center" FontSize="11" Text="All" />
+						</StackPanel>
+					</Button>
+					<Button Click="VaultFavorites_Click" Style="{StaticResource TextActionButton}" Margin="0,0,4,0">
+						<StackPanel>
+							<TextBlock HorizontalAlignment="Center" FontFamily="Segoe MDL2 Assets" FontSize="16" Text="&#xE734;" />
+							<TextBlock HorizontalAlignment="Center" FontSize="11" Text="Favorites" />
+						</StackPanel>
+					</Button>
+					<Button Click="VaultAdd_Click" Style="{StaticResource TextActionButton}" Margin="0,0,4,0">
+						<StackPanel>
+							<TextBlock HorizontalAlignment="Center" FontFamily="Segoe MDL2 Assets" FontSize="16" Text="&#xE710;" />
+							<TextBlock HorizontalAlignment="Center" FontSize="11" Text="Add" />
+						</StackPanel>
+					</Button>
+					<Button x:Name="VaultProvidersButton" Click="VaultProviders_Click" Style="{StaticResource TextActionButton}" Margin="0,0,4,0"
+						ToolTip="Connect to or import from password managers">
+						<StackPanel>
+							<TextBlock HorizontalAlignment="Center" FontFamily="Segoe MDL2 Assets" FontSize="16" Text="&#xE8B5;" />
+							<TextBlock HorizontalAlignment="Center" FontSize="11" Text="Providers" />
+						</StackPanel>
+					</Button>
+				</StackPanel>
+				<StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+					<Button x:Name="SettingsNavButton" Click="SettingsNav_Click" Foreground="{DynamicResource SecondaryTextBrush}" Style="{StaticResource TextActionButton}" Margin="0,0,4,0">
+						<StackPanel>
+							<TextBlock HorizontalAlignment="Center" FontFamily="Segoe MDL2 Assets" FontSize="16" Text="&#xE713;" />
+							<TextBlock HorizontalAlignment="Center" FontSize="11" Text="Settings" />
+						</StackPanel>
+					</Button>
+					<Button Click="LockNow_Click" Style="{StaticResource TextActionButton}" Margin="0,0,4,0" ToolTip="Lock">
+						<TextBlock FontFamily="Segoe MDL2 Assets" FontSize="16" Text="&#xE72E;" />
+					</Button>
 					<ToggleButton
 						x:Name="PinDockButton"
 						Margin="4,0,0,0"
@@ -118,11 +158,7 @@
 						Style="{StaticResource SecondaryToggleButton}"
 						ToolTip="Keep open (do not auto-collapse)"
 						Visibility="Collapsed">
-						<TextBlock
-							x:Name="PinDockIcon"
-							FontFamily="Segoe MDL2 Assets"
-							FontSize="16"
-							Text="&#xE718;" />
+						<TextBlock x:Name="PinDockIcon" FontFamily="Segoe MDL2 Assets" FontSize="16" Text="&#xE718;" />
 					</ToggleButton>
 					<Button
 						x:Name="CollapseDockButton"
@@ -134,10 +170,7 @@
 						Style="{StaticResource SecondaryButton}"
 						ToolTip="Collapse to edge handle"
 						Visibility="Collapsed">
-						<TextBlock
-							FontFamily="Segoe MDL2 Assets"
-							FontSize="16"
-							Text="&#xE76C;" />
+						<TextBlock FontFamily="Segoe MDL2 Assets" FontSize="16" Text="&#xE76C;" />
 					</Button>
 				</StackPanel>
 			</Grid>
@@ -145,7 +178,7 @@
 
 		<Grid
 			x:Name="LockOverlay"
-			Grid.RowSpan="2"
+			Grid.RowSpan="4"
 			Background="{DynamicResource PageBackgroundBrush}"
 			FocusManager.IsFocusScope="True"
 			PreviewTextInput="LockOverlay_PreviewTextInput"
@@ -203,7 +236,6 @@
 						HorizontalAlignment="Center"
 						Foreground="{DynamicResource BrandBlueBrush}"
 						Text="Waiting for YubiKey…" />
-					<!-- Receives Yubico OTP keystrokes from a touch; kept effectively invisible. -->
 					<TextBox
 						x:Name="YubiOtpCaptureBox"
 						Height="1"
@@ -237,5 +269,23 @@
 					TextAlignment="Center" />
 			</StackPanel>
 		</Grid>
+
+		<!-- Covers chrome until DB/dock init finishes — avoids black flash. -->
+		<Border
+			x:Name="StartupOverlay"
+			Grid.RowSpan="4"
+			Background="White"
+			Panel.ZIndex="200">
+			<syncfusion:SfBusyIndicator
+				Width="120"
+				Height="120"
+				HorizontalAlignment="Center"
+				VerticalAlignment="Center"
+				AnimationType="Cupertino"
+				Header="Loading"
+				IsBusy="True"
+				ViewboxHeight="56"
+				ViewboxWidth="56" />
+		</Border>
 	</Grid>
 </Window>

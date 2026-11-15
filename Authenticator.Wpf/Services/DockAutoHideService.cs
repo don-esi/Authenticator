@@ -20,6 +20,7 @@ public sealed class DockAutoHideService : IDisposable
     private readonly Dispatcher _dispatcher;
     private Timer? _timer;
     private int _collapseGate;
+    private int _tickQueued;
     private bool _disposed;
 
     public DockAutoHideService(
@@ -40,15 +41,17 @@ public sealed class DockAutoHideService : IDisposable
         if (_disposed)
             return;
 
+        // 150ms flooded the UI dispatcher with Background invokes while docked.
         if (_timer is null)
-            _timer = new Timer(static state => ((DockAutoHideService)state!).OnTick(), this, 150, 150);
+            _timer = new Timer(static state => ((DockAutoHideService)state!).OnTick(), this, 400, 400);
         else
-            _timer.Change(150, 150);
+            _timer.Change(400, 400);
     }
 
     public void Stop()
     {
         _timer?.Change(Timeout.Infinite, Timeout.Infinite);
+        Interlocked.Exchange(ref _tickQueued, 0);
     }
 
     public void Dispose()
@@ -65,12 +68,27 @@ public sealed class DockAutoHideService : IDisposable
         if (_disposed)
             return;
 
+        // Coalesce: skip if a UI tick is already pending.
+        if (Interlocked.CompareExchange(ref _tickQueued, 1, 0) != 0)
+            return;
+
         try
         {
-            _ = _dispatcher.BeginInvoke(OnTickCore, DispatcherPriority.Background);
+            _ = _dispatcher.BeginInvoke(() =>
+            {
+                try
+                {
+                    OnTickCore();
+                }
+                finally
+                {
+                    Interlocked.Exchange(ref _tickQueued, 0);
+                }
+            }, DispatcherPriority.Background);
         }
         catch (Exception ex)
         {
+            Interlocked.Exchange(ref _tickQueued, 0);
             LoggingConfiguration.LogException(ex, "Dock auto-hide tick failed.", nameof(DockAutoHideService));
         }
     }

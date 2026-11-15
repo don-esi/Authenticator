@@ -32,12 +32,14 @@ public partial class App : Application
 
         var prefs = new CodesUiPreferences().Load();
         ThemeService.Initialize(prefs.ThemeMode);
+        SyncfusionBootstrap.Initialize();
         LoggingConfiguration.LogInfo("WPF application launch started.", nameof(App));
 
         ShutdownMode = ShutdownMode.OnExplicitShutdown;
 
         _mainWindow = new MainWindow();
         MainWindow = _mainWindow;
+        SyncfusionBootstrap.ApplyTo(_mainWindow);
         _mainWindow.Show();
 
         _tray = new TrayIconService();

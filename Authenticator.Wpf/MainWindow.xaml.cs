@@ -7,6 +7,7 @@ using System.Windows.Threading;
 using Authenticator.Data;
 using Authenticator.Logging;
 using Authenticator.Services;
+using Authenticator.Services.Providers;
 
 namespace Authenticator;
 
@@ -41,10 +42,14 @@ public partial class MainWindow : Window
     private DockHandleWindow? _dockHandle;
     private DockAutoHideService? _dockAutoHide;
     private readonly DispatcherTimer _dockMouseLeaveTimer;
+    private readonly SqlDiscoveryService _discovery = new();
+    private bool _vaultTabActive;
 
     public MainWindow()
     {
         InitializeComponent();
+        // Position from local dock cache before first paint — SQL dock state loads later in Loaded.
+        ApplyCachedDockPlacement();
         // Keep pages hidden until Loaded decides lock vs. show — otherwise CodesView
         // starts ReloadAsync on first show and steals keyboard focus from the PIN box.
         PageHost.Visibility = Visibility.Collapsed;
@@ -156,6 +161,14 @@ public partial class MainWindow : Window
         var databaseReady = false;
         try
         {
+            var online = await SharedConnectionMonitor.Instance.RefreshAsync();
+            UpdateOfflineBadge();
+            if (!online && ConnectionConfig.Role is ConnectionRole.Host or ConnectionRole.Join)
+            {
+                await new OfflineVaultService().EnsureCreatedAsync();
+                LoggingConfiguration.LogInfo("Starting in offline mode against local encrypted backup.", nameof(MainWindow));
+            }
+
             await DatabaseInitializer.InitializeDatabaseAsync();
             databaseReady = true;
             var settings = await _settings.GetSettingsAsync();
@@ -166,6 +179,7 @@ public partial class MainWindow : Window
             _dockPosition = NormalizeDockPosition(settings.WindowDockPosition);
             _isCollapsed = settings.IsWindowCollapsed && IsDocked;
             _handleOffsetY = settings.WindowDockHandleOffsetY;
+            CacheDockPlacementLocally();
             LoadUiDesktopPrefs();
             UpdateCollapseButton();
             ApplyTopmost();
@@ -174,26 +188,92 @@ public partial class MainWindow : Window
                 await CollapseToDockAsync(persist: false, animate: false);
             else if (IsDocked)
                 SnapExpandedToDockEdge();
+            else
+                CenterOnScreen();
 
             UpdateDockAutoHideWatch();
         }
         catch (Exception ex)
         {
             LoggingConfiguration.LogException(ex, "Failed to load auto-lock / dock settings.", nameof(MainWindow));
-            MessageBox.Show(
-                this,
-                $"Could not connect to SQL Server ({ConnectionConfig.Server}, database {ConnectionConfig.Database}).\n\n" +
-                "Install SQL Server Express with the SQLEXPRESS instance, or set Server/Database in:\n" +
-                $"{ConnectionConfig.ConfigPath}\n\n{ex.Message}",
-                "Authenticator — database unavailable",
-                MessageBoxButton.OK,
-                MessageBoxImage.Error);
+            try
+            {
+                ConnectionConfig.SetOfflineMode(true);
+                await new OfflineVaultService().EnsureCreatedAsync();
+                UpdateOfflineBadge();
+                databaseReady = true;
+                LoggingConfiguration.LogInfo("Fell back to offline encrypted backup.", nameof(MainWindow));
+            }
+            catch (Exception offlineEx)
+            {
+                LoggingConfiguration.LogException(offlineEx, "Offline fallback failed.", nameof(MainWindow));
+                RevealMainWindow();
+                MessageBox.Show(
+                    this,
+                    $"Could not connect to SQL Server ({ConnectionConfig.Server}, database {ConnectionConfig.Database}).\n\n" +
+                    "Use Settings → Discover LAN, or set Server/Database in:\n" +
+                    $"{ConnectionConfig.ConfigPath}\n\n{ex.Message}",
+                    "Authenticator — database unavailable",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Error);
+            }
         }
 
         if (databaseReady && !_hasUnlockMethod)
             await RunFirstRunWizardAsync();
 
+        RevealMainWindow();
         _lockTimer.Start();
+    }
+
+    private void RevealMainWindow()
+    {
+        if (StartupOverlay is not null)
+            StartupOverlay.Visibility = Visibility.Collapsed;
+
+        Background = (Brush)FindResource("PageBackgroundBrush");
+
+        if (!IsVisible || (IsDocked && _isCollapsed))
+            return;
+        if (Opacity < 1)
+            Opacity = 1;
+    }
+
+    /// <summary>Apply last-known dock placement from local prefs before SQL is ready.</summary>
+    private void ApplyCachedDockPlacement()
+    {
+        var prefs = _uiPrefs.Load();
+        _dockPosition = NormalizeDockPosition(prefs.WindowDockPosition);
+        _isCollapsed = prefs.IsWindowCollapsed && IsDocked;
+        _handleOffsetY = prefs.WindowDockHandleOffsetY <= 0 ? 120 : prefs.WindowDockHandleOffsetY;
+        LoadUiDesktopPrefs();
+        UpdateCollapseButton();
+
+        // Place now under StartupOverlay; Loaded hides the overlay after SQL dock state is applied.
+        if (IsDocked && _isCollapsed)
+            return;
+
+        if (IsDocked)
+            SnapExpandedToDockEdge();
+        else
+            CenterOnScreen();
+    }
+
+    private void CenterOnScreen()
+    {
+        var work = SystemParameters.WorkArea;
+        var (width, height) = GetWindowSize();
+        Left = work.Left + Math.Max(0, (work.Width - width) / 2);
+        Top = work.Top + Math.Max(0, (work.Height - height) / 2);
+    }
+
+    private void CacheDockPlacementLocally()
+    {
+        var prefs = _uiPrefs.Load();
+        prefs.WindowDockPosition = _dockPosition;
+        prefs.IsWindowCollapsed = _isCollapsed && IsDocked;
+        prefs.WindowDockHandleOffsetY = _handleOffsetY;
+        _uiPrefs.Save(prefs);
     }
 
     private async Task RunFirstRunWizardAsync()
@@ -578,6 +658,7 @@ public partial class MainWindow : Window
 
     private async Task PersistDockStateAsync()
     {
+        CacheDockPlacementLocally();
         try
         {
             await _settings.SetWindowDockStateAsync(_dockPosition, _isCollapsed && IsDocked, _handleOffsetY);
@@ -686,6 +767,9 @@ public partial class MainWindow : Window
         CodesPage.SetCodesMasked(false);
         BackupPage.SetCodesMasked(false);
         VaultKeyService.Instance.Clear();
+        ProviderSessionService.Instance.DropLiveSessions();
+        _discovery.StopAdvertising();
+        ForegroundWindowMonitor.Instance.Stop();
         PageHost.Visibility = Visibility.Collapsed;
         LockOverlay.Visibility = Visibility.Visible;
         UnlockPinBox.Clear();
@@ -975,6 +1059,21 @@ public partial class MainWindow : Window
                     $"Post-unlock migration encrypted accounts={migrated.Accounts}, backupCodes={migrated.BackupCodes}.",
                     nameof(MainWindow));
             }
+
+            await SharedConnectionMonitor.Instance.RefreshAsync();
+            UpdateOfflineBadge();
+            if (!ConnectionConfig.IsOfflineMode)
+            {
+                var (recoveryKey, _) = await new VaultMigrationService().PromoteAndSeedAsync();
+                if (!string.IsNullOrEmpty(recoveryKey))
+                    RecoveryKeyWindow.Show(this, recoveryKey);
+
+                if (ConnectionConfig.Role == ConnectionRole.Host)
+                    StartHostDiscoveryAdvertising();
+            }
+
+            ForegroundWindowMonitor.Instance.Start();
+            await ProviderSessionService.Instance.ReconnectAllAsync();
         }
         catch (Exception ex)
         {
@@ -1018,14 +1117,83 @@ public partial class MainWindow : Window
         await SettingsPage.ReloadAsync();
     }
 
+    private void TopCodesTab_Click(object sender, RoutedEventArgs e)
+    {
+        _vaultTabActive = false;
+        UpdateTopTabs();
+        ShowPage(CodesPage);
+    }
+
+    private async void TopVaultTab_Click(object sender, RoutedEventArgs e)
+    {
+        _vaultTabActive = true;
+        UpdateTopTabs();
+        ShowPage(VaultPage);
+        await VaultPage.ReloadAsync();
+    }
+
+    private void CodesFavorites_Click(object sender, RoutedEventArgs e) =>
+        CodesPage.SetFavoritesFilter(true);
+
+    private void VaultAll_Click(object sender, RoutedEventArgs e) => VaultPage.ShowAllItems();
+
+    private void VaultFavorites_Click(object sender, RoutedEventArgs e) => VaultPage.ShowFavorites();
+
+    private async void VaultAdd_Click(object sender, RoutedEventArgs e) => await VaultPage.AddNewAsync();
+
+    private void VaultProviders_Click(object sender, RoutedEventArgs e) =>
+        VaultPage.ShowProvidersMenu(VaultProvidersButton);
+
+    private void LockNow_Click(object sender, RoutedEventArgs e) => Lock();
+
     private void ShowPage(UIElement page)
     {
         CodesPage.Visibility = page == CodesPage ? Visibility.Visible : Visibility.Collapsed;
         BackupPage.Visibility = page == BackupPage ? Visibility.Visible : Visibility.Collapsed;
+        VaultPage.Visibility = page == VaultPage ? Visibility.Visible : Visibility.Collapsed;
         SettingsPage.Visibility = page == SettingsPage ? Visibility.Visible : Visibility.Collapsed;
         SetNavBrush(CodesNavButton, page == CodesPage);
         SetNavBrush(BackupNavButton, page == BackupPage);
         SetNavBrush(SettingsNavButton, page == SettingsPage);
+        CodesContextBar.Visibility = _vaultTabActive || page == SettingsPage ? Visibility.Collapsed : Visibility.Visible;
+        VaultContextBar.Visibility = _vaultTabActive && page != SettingsPage ? Visibility.Visible : Visibility.Collapsed;
+        if (page == SettingsPage)
+        {
+            CodesContextBar.Visibility = Visibility.Collapsed;
+            VaultContextBar.Visibility = Visibility.Collapsed;
+        }
+    }
+
+    private void UpdateTopTabs()
+    {
+        SetNavBrush(TopCodesTab, !_vaultTabActive);
+        SetNavBrush(TopVaultTab, _vaultTabActive);
+    }
+
+    private void UpdateOfflineBadge()
+    {
+        OfflineBadge.Visibility = ConnectionConfig.IsOfflineMode ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    private void StartHostDiscoveryAdvertising()
+    {
+        try
+        {
+            var server = ConnectionConfig.ActiveProfile.Server;
+            if (server.StartsWith(".\\", StringComparison.Ordinal))
+                server = Environment.MachineName + server[1..];
+
+            _discovery.StartAdvertising(new SqlDiscoveryAdvertisement
+            {
+                Server = server,
+                Database = ConnectionConfig.Database,
+                VdekFingerprintPrefix = ConnectionConfig.LastFingerprintPrefix
+            });
+        }
+        catch (Exception ex)
+        {
+            LoggingConfiguration.LogException(ex, "Failed to start SQL discovery advertising.", nameof(MainWindow));
+        }
     }
 
     private static void SetNavBrush(System.Windows.Controls.Button button, bool selected)
