@@ -50,6 +50,9 @@ public class VaultItem
 
     public DateTime? ModifiedAt { get; set; }
 
+    /// <summary>Set when the user copies credentials or auto-fills — drives Recents.</summary>
+    public DateTime? LastUsedAt { get; set; }
+
     public virtual ICollection<VaultCustomField> CustomFields { get; set; } = new List<VaultCustomField>();
 
     public virtual ICollection<ExternalLink> ExternalLinks { get; set; } = new List<ExternalLink>();

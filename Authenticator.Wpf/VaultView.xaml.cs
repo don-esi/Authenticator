@@ -174,7 +174,8 @@ public partial class VaultView : UserControl
         {
             VaultFilterMode.Favorites => _allRowsView.Where(r => r.IsFavorite),
             VaultFilterMode.Recents => _all
-                .OrderByDescending(i => i.ModifiedAt ?? i.CreatedAt)
+                .Where(i => i.LastUsedAt is not null)
+                .OrderByDescending(i => i.LastUsedAt)
                 .Take(40)
                 .Select(i => _rowById[i.Id]),
             VaultFilterMode.Relevant when !string.IsNullOrWhiteSpace(_autoFilter) =>
@@ -421,14 +422,23 @@ public partial class VaultView : UserControl
             menu.PlacementTarget = placement;
             menu.Placement = PlacementMode.Bottom;
         }
-        menu.Items.Add(MakeMenu("Copy username", () => ClipboardHelper.Copy(item.Username)));
-        menu.Items.Add(MakeMenu("Copy password", () => ClipboardHelper.Copy(item.Password)));
+        menu.Items.Add(MakeMenu("Copy username", () =>
+        {
+            ClipboardHelper.Copy(item.Username);
+            _ = MarkUsedAsync(row.Id);
+        }));
+        menu.Items.Add(MakeMenu("Copy password", () =>
+        {
+            ClipboardHelper.Copy(item.Password);
+            _ = MarkUsedAsync(row.Id);
+        }));
         if (!string.IsNullOrWhiteSpace(item.TotpSecret))
         {
             menu.Items.Add(MakeMenu("Copy TOTP", () =>
             {
                 var code = TotpGenerator.TryGenerate(item.TotpSecret, "SHA1", 6, 30);
                 ClipboardHelper.Copy(string.IsNullOrEmpty(code) ? item.TotpSecret : code);
+                _ = MarkUsedAsync(row.Id);
             }));
         }
         menu.IsOpen = true;
@@ -439,6 +449,24 @@ public partial class VaultView : UserControl
         var item = await LoadItemAsync(row);
         if (item is null) return;
         ClipboardHelper.Copy(item.Password);
+        await MarkUsedAsync(row.Id);
+    }
+
+    private async Task MarkUsedAsync(Guid id)
+    {
+        try
+        {
+            await _vault.TouchLastUsedAsync(id);
+            var cached = _all.FirstOrDefault(i => i.Id == id);
+            if (cached is not null)
+                cached.LastUsedAt = DateTime.UtcNow;
+            if (_filter == VaultFilterMode.Recents)
+                ApplyFilter();
+        }
+        catch
+        {
+            // Recents bookkeeping must not interrupt copy/fill.
+        }
     }
 
     private void EditItem(VaultItem item)

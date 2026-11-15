@@ -119,6 +119,26 @@ public sealed class VaultItemService
         await SaveAsync(item, ct);
     }
 
+    /// <summary>Records credential use for Recents without bumping <see cref="VaultItem.ModifiedAt"/>.</summary>
+    public async Task TouchLastUsedAsync(Guid id, CancellationToken ct = default)
+    {
+        var now = DateTime.UtcNow;
+        if (ConnectionConfig.IsOfflineMode)
+        {
+            await _offline.TouchLastUsedAsync(id, now, ct);
+            return;
+        }
+
+        await using var db = new AuthenticatorDbContext();
+        var item = await db.VaultItems.FirstOrDefaultAsync(i => i.Id == id, ct);
+        if (item is null)
+            return;
+
+        item.LastUsedAt = now;
+        await db.SaveChangesAsync(ct);
+        await _offline.TouchLastUsedAsync(id, now, ct);
+    }
+
     public async Task DeleteAsync(Guid id, bool softDelete = true, CancellationToken ct = default)
     {
         if (ConnectionConfig.IsOfflineMode)

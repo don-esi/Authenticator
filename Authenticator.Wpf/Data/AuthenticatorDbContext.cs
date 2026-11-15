@@ -100,6 +100,7 @@ public partial class AuthenticatorDbContext : DbContext
             entity.HasIndex(e => e.IsFavorite);
             entity.HasIndex(e => e.FolderId);
             entity.HasIndex(e => e.LinkedAccountId);
+            entity.HasIndex(e => e.LastUsedAt);
 
             entity.HasOne(e => e.Folder)
                 .WithMany(f => f.Items)

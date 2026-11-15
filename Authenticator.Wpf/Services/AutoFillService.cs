@@ -61,6 +61,15 @@ public sealed class AutoFillService
             }
         }
 
+        try
+        {
+            await new VaultItemService().TouchLastUsedAsync(item.Id, ct);
+        }
+        catch (Exception ex)
+        {
+            LoggingConfiguration.LogException(ex, $"Failed to record last-used for '{item.Title}'.", nameof(AutoFillService));
+        }
+
         LoggingConfiguration.LogInfo($"Auto-fill completed for '{item.Title}' (submit={submit}, totp={includeTotp}).", nameof(AutoFillService));
     }
 

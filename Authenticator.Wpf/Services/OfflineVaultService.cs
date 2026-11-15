@@ -35,6 +35,51 @@ public sealed class OfflineVaultService
     {
         await using var db = new OfflineVaultDbContext();
         await db.Database.EnsureCreatedAsync(ct);
+        await EnsureLastUsedAtColumnAsync(db, ct);
+    }
+
+    private static async Task EnsureLastUsedAtColumnAsync(OfflineVaultDbContext db, CancellationToken ct)
+    {
+        try
+        {
+            var connection = db.Database.GetDbConnection();
+            if (connection.State != System.Data.ConnectionState.Open)
+                await connection.OpenAsync(ct);
+
+            await using var check = connection.CreateCommand();
+            check.CommandText = "PRAGMA table_info(VaultItems)";
+            await using var reader = await check.ExecuteReaderAsync(ct);
+            while (await reader.ReadAsync(ct))
+            {
+                if (string.Equals(reader.GetString(1), "LastUsedAt", StringComparison.OrdinalIgnoreCase))
+                    return;
+            }
+            await reader.DisposeAsync();
+
+            await db.Database.ExecuteSqlRawAsync("ALTER TABLE VaultItems ADD COLUMN LastUsedAt TEXT NULL", ct);
+        }
+        catch (Exception ex)
+        {
+            LoggingConfiguration.LogException(ex, "Failed to ensure offline VaultItems.LastUsedAt column.", nameof(OfflineVaultService));
+        }
+    }
+
+    public async Task TouchLastUsedAsync(Guid id, DateTime usedAtUtc, CancellationToken ct = default)
+    {
+        try
+        {
+            await EnsureCreatedAsync(ct);
+            await using var db = new OfflineVaultDbContext();
+            var item = await db.VaultItems.FirstOrDefaultAsync(i => i.Id == id, ct);
+            if (item is null)
+                return;
+            item.LastUsedAt = usedAtUtc;
+            await db.SaveChangesAsync(ct);
+        }
+        catch (Exception ex)
+        {
+            LoggingConfiguration.LogException(ex, $"Touch last-used failed for offline item {id}.", nameof(OfflineVaultService));
+        }
     }
 
     public async Task SeedFromSharedAsync(CancellationToken ct = default)
@@ -392,7 +437,8 @@ public sealed class OfflineVaultService
         TotpSecret = item.TotpSecret,
         PayloadJson = item.PayloadJson,
         CreatedAt = item.CreatedAt,
-        ModifiedAt = item.ModifiedAt
+        ModifiedAt = item.ModifiedAt,
+        LastUsedAt = item.LastUsedAt
     };
 
     private sealed class VaultItemDto

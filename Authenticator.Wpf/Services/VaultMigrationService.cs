@@ -101,8 +101,18 @@ public sealed class VaultMigrationService
                 TotpSecret nvarchar(max) NULL,
                 PayloadJson nvarchar(max) NULL,
                 CreatedAt datetime2 NOT NULL,
-                ModifiedAt datetime2 NULL
+                ModifiedAt datetime2 NULL,
+                LastUsedAt datetime2 NULL
               );
+            END
+            """, ct);
+
+        await db.Database.ExecuteSqlRawAsync(
+            """
+            IF OBJECT_ID(N'dbo.VaultItems', N'U') IS NOT NULL
+               AND COL_LENGTH(N'dbo.VaultItems', N'LastUsedAt') IS NULL
+            BEGIN
+              ALTER TABLE dbo.VaultItems ADD LastUsedAt datetime2 NULL;
             END
             """, ct);
 
