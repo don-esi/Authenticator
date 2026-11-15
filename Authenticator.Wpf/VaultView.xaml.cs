@@ -32,6 +32,7 @@ public partial class VaultView : UserControl
     private Dictionary<Guid, VaultRow> _rowById = new();
     private VaultFilterMode _filter = VaultFilterMode.All;
     private string? _autoFilter;
+    private IReadOnlyList<string> _autoMatchTerms = Array.Empty<string>();
     private bool _chipSync;
     private readonly DispatcherTimer _searchDebounce;
 
@@ -54,14 +55,16 @@ public partial class VaultView : UserControl
         };
         ForegroundWindowMonitor.Instance.ForegroundChanged += (_, info) =>
         {
-            var next = info.UrlHint ?? info.Title;
-            if (string.Equals(_autoFilter, next, StringComparison.Ordinal))
-                return;
+            _autoFilter = info.UrlHint;
+            _autoMatchTerms = info.MatchTerms.Count > 0
+                ? info.MatchTerms
+                : string.IsNullOrWhiteSpace(info.UrlHint)
+                    ? Array.Empty<string>()
+                    : new[] { info.UrlHint };
 
-            _autoFilter = next;
-            if (FilterHint is not null)
-                FilterHint.Text = string.IsNullOrWhiteSpace(_autoFilter) ? "" : $"Filter: {_autoFilter}";
-            if (!string.IsNullOrWhiteSpace(_autoFilter) && _filter == VaultFilterMode.Relevant)
+            UpdateFilterHint();
+            // Auto-filter only drives the Relevant chip — never All/Favorites/Recents.
+            if (_filter == VaultFilterMode.Relevant)
                 ApplyFilter();
         };
     }
@@ -148,8 +151,23 @@ public partial class VaultView : UserControl
         ChipFavorites.IsChecked = mode == VaultFilterMode.Favorites;
         ChipRecents.IsChecked = mode == VaultFilterMode.Recents;
         _chipSync = false;
+        UpdateFilterHint();
         if (reload)
             _ = ReloadAsync();
+    }
+
+    private void UpdateFilterHint()
+    {
+        if (FilterHint is null)
+            return;
+
+        if (_filter != VaultFilterMode.Relevant || string.IsNullOrWhiteSpace(_autoFilter))
+        {
+            FilterHint.Text = "";
+            return;
+        }
+
+        FilterHint.Text = $"Filter: {_autoFilter}";
     }
 
     private void ApplyFilter()
@@ -178,13 +196,12 @@ public partial class VaultView : UserControl
                 .OrderByDescending(i => i.LastUsedAt)
                 .Take(40)
                 .Select(i => _rowById[i.Id]),
-            VaultFilterMode.Relevant when !string.IsNullOrWhiteSpace(_autoFilter) =>
-                _allRowsView.Where(r => MatchesRow(_autoFilter!, r)),
+            VaultFilterMode.Relevant => FilterRelevantRows(),
             _ => _allRowsView
         };
 
         if (!string.IsNullOrWhiteSpace(q))
-            rows = rows.Where(r => MatchesRow(q, r));
+            rows = rows.Where(r => MatchesSearch(q, r));
 
         if (_filter is not VaultFilterMode.Recents)
             rows = rows.OrderBy(r => r.SortTitle, StringComparer.OrdinalIgnoreCase);
@@ -195,6 +212,29 @@ public partial class VaultView : UserControl
 
         _rows = new ObservableCollection<VaultRow>(nextList);
         ItemsList.ItemsSource = _rows;
+    }
+
+    private IEnumerable<VaultRow> FilterRelevantRows()
+    {
+        // Seed from current foreground if we haven't received an event yet.
+        if (_autoMatchTerms.Count == 0 && ForegroundWindowMonitor.Instance.Current is { } current)
+        {
+            _autoFilter = current.UrlHint;
+            _autoMatchTerms = current.MatchTerms;
+            UpdateFilterHint();
+        }
+
+        if (_autoMatchTerms.Count == 0 && string.IsNullOrWhiteSpace(_autoFilter))
+            return _allRowsView;
+
+        var raw = _autoMatchTerms.Count > 0
+            ? _autoMatchTerms
+            : string.IsNullOrWhiteSpace(_autoFilter) ? Array.Empty<string>() : new[] { _autoFilter! };
+        var terms = ForegroundWindowMonitor.StrongMatchTerms(raw);
+        if (terms.Count == 0)
+            return Array.Empty<VaultRow>();
+
+        return _allRowsView.Where(r => MatchesRelevant(terms, r));
     }
 
     private static bool SameRowIds(IReadOnlyList<VaultRow> current, IReadOnlyList<VaultRow> next)
@@ -209,10 +249,107 @@ public partial class VaultView : UserControl
         return true;
     }
 
-    private static bool MatchesRow(string needle, VaultRow r) =>
+    private static bool MatchesSearch(string needle, VaultRow r) =>
         r.Subtitle.Contains(needle, StringComparison.OrdinalIgnoreCase) ||
         r.Identity.Contains(needle, StringComparison.OrdinalIgnoreCase) ||
-        r.SortTitle.Contains(needle, StringComparison.OrdinalIgnoreCase);
+        r.SortTitle.Contains(needle, StringComparison.OrdinalIgnoreCase) ||
+        r.MatchBlob.Contains(needle, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Relevance requires a distinctive term: shared domain label, or a strong token
+    /// as a whole word in title/username/host/URL. Weak words like "tool" never match alone.
+    /// </summary>
+    private static bool MatchesRelevant(IReadOnlyList<string> terms, VaultRow r)
+    {
+        var vaultTokens = r.MatchTokens;
+        foreach (var term in terms)
+        {
+            if (ForegroundWindowMonitor.IsWeakToken(term) && !term.Contains('.'))
+                continue;
+
+            if (!string.IsNullOrEmpty(r.Host) && DomainSharesLabel(r.Host, term))
+                return true;
+
+            if (HasWholeWord(r.SortTitle, term) ||
+                HasWholeWord(r.Subtitle, term) ||
+                HasWholeWord(r.Identity, term) ||
+                HasWholeWord(r.Host, term))
+                return true;
+
+            // Longer distinctive tokens may match as a substring of a host/title compound
+            // (e.g. "ynab" in "app.ynab.com"), but never short/generic words.
+            if (term.Length >= 5 &&
+                !term.Contains(' ') &&
+                (r.Host.Contains(term, StringComparison.OrdinalIgnoreCase) ||
+                 r.SortTitle.Contains(term, StringComparison.OrdinalIgnoreCase) ||
+                 r.MatchBlob.Contains(term, StringComparison.OrdinalIgnoreCase)))
+                return true;
+
+            foreach (var vaultToken in vaultTokens)
+            {
+                if (vaultToken.Equals(term, StringComparison.OrdinalIgnoreCase))
+                    return true;
+                if (term.Length >= 5 && vaultToken.Length >= 5 &&
+                    (vaultToken.Contains(term, StringComparison.OrdinalIgnoreCase) ||
+                     term.Contains(vaultToken, StringComparison.OrdinalIgnoreCase)))
+                    return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool HasWholeWord(string? text, string term)
+    {
+        if (string.IsNullOrWhiteSpace(text) || string.IsNullOrWhiteSpace(term))
+            return false;
+        foreach (var token in ForegroundWindowMonitor.Tokenize(text))
+        {
+            if (token.Equals(term, StringComparison.OrdinalIgnoreCase))
+                return true;
+        }
+
+        // Tokenize skips weak words — still allow exact phrase containment for multi-word terms.
+        if (term.Contains(' ') && text.Contains(term, StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        return false;
+    }
+
+    private static bool DomainSharesLabel(string host, string term)
+    {
+        var needle = term.Trim().Trim('.').ToLowerInvariant();
+        if (needle.StartsWith("www.", StringComparison.Ordinal))
+            needle = needle[4..];
+        if (needle.Length < 4 || ForegroundWindowMonitor.IsWeakToken(needle))
+            return false;
+
+        host = host.Trim().Trim('.').ToLowerInvariant();
+        if (host.StartsWith("www.", StringComparison.Ordinal))
+            host = host[4..];
+
+        if (host.Equals(needle, StringComparison.Ordinal) ||
+            host.EndsWith("." + needle, StringComparison.Ordinal) ||
+            needle.EndsWith("." + host, StringComparison.Ordinal))
+            return true;
+
+        // Exact DNS label only — no substring ("tool" must not hit random hosts).
+        foreach (var label in host.Split('.', StringSplitOptions.RemoveEmptyEntries))
+        {
+            if (label.Length < 4 || ForegroundWindowMonitor.IsWeakToken(label))
+                continue;
+            if (label.Equals(needle, StringComparison.OrdinalIgnoreCase))
+                return true;
+            // "ynab" ↔ "app.ynab.com"; "github" ↔ "github.com"
+            if (needle.Length >= 5 &&
+                (label.Equals(needle, StringComparison.OrdinalIgnoreCase) ||
+                 (label.StartsWith(needle, StringComparison.OrdinalIgnoreCase) && label.Length - needle.Length <= 2) ||
+                 (needle.StartsWith(label, StringComparison.OrdinalIgnoreCase) && needle.Length - label.Length <= 2)))
+                return true;
+        }
+
+        return false;
+    }
 
     private async Task<VaultItem?> LoadItemAsync(VaultRow? row)
     {
@@ -583,6 +720,10 @@ public partial class VaultView : UserControl
         public string Subtitle { get; set; } = "";
         public string Identity { get; set; } = "";
         public string SortTitle { get; set; } = "";
+        public string Host { get; set; } = "";
+        /// <summary>Lowercased title/username/host/url blob for partial relevance matching.</summary>
+        public string MatchBlob { get; set; } = "";
+        public string[] MatchTokens { get; set; } = Array.Empty<string>();
         public bool IsFavorite { get; set; }
         public string Initial { get; set; } = "?";
         public Brush IconBrush { get; set; } = Brushes.Gray;
@@ -592,15 +733,27 @@ public partial class VaultView : UserControl
 
         public static VaultRow From(VaultItem item)
         {
-            var subtitle = HostOrTitle(item);
+            var host = TryHost(item.Url);
+            var subtitle = !string.IsNullOrWhiteSpace(host) ? host : item.Title;
             var identity = string.IsNullOrWhiteSpace(item.Username) ? item.Title : item.Username!;
             var seed = string.IsNullOrWhiteSpace(subtitle) ? identity : subtitle;
+            var blob = string.Join(' ',
+                item.Title,
+                item.Username,
+                item.Url,
+                host,
+                host.Contains('.') ? host.Split('.')[0] : "").ToLowerInvariant();
+            var tokens = ForegroundWindowMonitor.StrongMatchTerms(
+                new[] { item.Title, item.Username ?? "", item.Url ?? "", host });
             return new VaultRow
             {
                 Id = item.Id,
                 Subtitle = subtitle,
                 Identity = identity,
                 SortTitle = item.Title,
+                Host = host,
+                MatchBlob = blob,
+                MatchTokens = tokens.ToArray(),
                 IsFavorite = item.IsFavorite,
                 Initial = string.IsNullOrWhiteSpace(seed) ? "?" : seed.Trim()[..1].ToUpperInvariant(),
                 IconBrush = AccountEdits.InitialBrush(seed),
@@ -614,13 +767,13 @@ public partial class VaultView : UserControl
             };
         }
 
-        private static string HostOrTitle(VaultItem item)
+        private static string TryHost(string? url)
         {
-            if (!string.IsNullOrWhiteSpace(item.Url) &&
-                Uri.TryCreate(item.Url, UriKind.Absolute, out var uri) &&
+            if (!string.IsNullOrWhiteSpace(url) &&
+                Uri.TryCreate(url, UriKind.Absolute, out var uri) &&
                 !string.IsNullOrWhiteSpace(uri.Host))
                 return uri.Host;
-            return item.Title;
+            return "";
         }
     }
 }
