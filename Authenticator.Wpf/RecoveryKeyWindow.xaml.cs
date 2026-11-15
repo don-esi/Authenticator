@@ -9,7 +9,6 @@ public partial class RecoveryKeyWindow : Window
     public RecoveryKeyWindow(string recoveryKey)
     {
         InitializeComponent();
-        SyncfusionBootstrap.ApplyTo(this);
         KeyBox.Text = recoveryKey ?? "";
         Loaded += (_, _) =>
         {

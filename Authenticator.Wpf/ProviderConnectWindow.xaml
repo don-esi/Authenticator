@@ -1,70 +1,129 @@
 <Window x:Class="Authenticator.ProviderConnectWindow"
 	xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
 	xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-	xmlns:syncfusion="http://schemas.syncfusion.com/wpf"
-	xmlns:syncfusionskin="clr-namespace:Syncfusion.SfSkinManager;assembly=Syncfusion.SfSkinManager.WPF"
 	Title="Password manager"
 	Width="500"
-	Height="480"
+	Height="520"
+	MinWidth="420"
+	MinHeight="420"
 	WindowStartupLocation="CenterOwner"
+	ShowInTaskbar="False"
 	Background="{DynamicResource PageBackgroundBrush}"
 	Foreground="{DynamicResource PrimaryTextBrush}"
-	syncfusionskin:SfSkinManager.Theme="{syncfusionskin:SkinManagerExtension ThemeName=Windows11Light}">
-	<StackPanel Margin="16">
-		<TextBlock x:Name="ModeHint" FontSize="12" Foreground="{DynamicResource SecondaryTextBrush}" TextWrapping="Wrap" Margin="0,0,0,10" />
+	FontFamily="Segoe UI"
+	FontSize="14">
+	<Grid>
+		<Grid.RowDefinitions>
+			<RowDefinition Height="Auto" />
+			<RowDefinition Height="*" />
+		</Grid.RowDefinitions>
 
-		<TextBlock Text="Provider" />
-		<ComboBox x:Name="ProviderBox" Margin="0,0,0,8" SelectionChanged="ProviderBox_SelectionChanged" />
-		<TextBlock x:Name="CapsText" FontSize="11" Foreground="{DynamicResource SecondaryTextBrush}" TextWrapping="Wrap" Margin="0,0,0,8" />
-
-		<TextBlock x:Name="UserLabel" Text="Username / email" />
-		<TextBox x:Name="UserBox" Margin="0,0,0,8" />
-
-		<TextBlock Text="Password / master password" />
-		<PasswordBox x:Name="PassBox" Margin="0,0,0,8" />
-
-		<TextBlock x:Name="PathLabel" Text="Vault / export file" />
-		<Grid Margin="0,0,0,8">
-			<Grid.ColumnDefinitions>
-				<ColumnDefinition Width="*" />
-				<ColumnDefinition Width="Auto" />
-			</Grid.ColumnDefinitions>
-			<TextBox x:Name="PathBox" VerticalAlignment="Center" />
-			<syncfusion:ButtonAdv
-				Grid.Column="1"
-				Margin="8,0,0,0"
-				Label="Browse…"
-				SizeMode="Normal"
-				Click="BrowsePath_Click" />
-		</Grid>
-
-		<StackPanel x:Name="KeyFilePanel">
-			<TextBlock Text="Key file (optional)" />
-			<Grid Margin="0,0,0,8">
-				<Grid.ColumnDefinitions>
-					<ColumnDefinition Width="*" />
-					<ColumnDefinition Width="Auto" />
-				</Grid.ColumnDefinitions>
-				<TextBox x:Name="KeyBox" VerticalAlignment="Center" />
-				<syncfusion:ButtonAdv
-					Grid.Column="1"
-					Margin="8,0,0,0"
-					Label="Browse…"
-					SizeMode="Normal"
-					Click="BrowseKey_Click" />
+		<Border Style="{StaticResource DialogHeader}">
+			<Grid>
+				<Button Content="Cancel"
+					HorizontalAlignment="Left"
+					IsCancel="True"
+					Style="{StaticResource TextActionButton}"
+					AutomationProperties.Name="Cancel"
+					Click="Cancel_Click" />
+				<TextBlock x:Name="TitleText"
+					Text="Password manager"
+					FontSize="17"
+					FontWeight="SemiBold"
+					HorizontalAlignment="Center"
+					VerticalAlignment="Center" />
+				<Button x:Name="PrimaryButton"
+					Content="Connect"
+					HorizontalAlignment="Right"
+					IsDefault="True"
+					Style="{StaticResource TextActionButton}"
+					AutomationProperties.Name="Connect"
+					Click="Primary_Click" />
 			</Grid>
-		</StackPanel>
+		</Border>
 
-		<CheckBox
-			x:Name="ImportAfterConnectCheck"
-			Margin="0,4,0,12"
-			Content="Import / sync entries after connecting"
-			IsChecked="True"
-			Visibility="Collapsed" />
+		<ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" Padding="16,12,16,16">
+			<StackPanel>
+				<TextBlock x:Name="ModeHint"
+					FontSize="13"
+					Foreground="{DynamicResource SecondaryTextBrush}"
+					TextWrapping="Wrap"
+					Margin="0,0,0,12" />
 
-		<StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
-			<syncfusion:ButtonAdv Label="Cancel" IsCancel="True" Margin="0,0,8,0" SizeMode="Normal" Click="Cancel_Click" />
-			<syncfusion:ButtonAdv x:Name="PrimaryButton" Label="Connect" Click="Primary_Click" SizeMode="Normal" />
-		</StackPanel>
-	</StackPanel>
+				<Border Style="{StaticResource DialogCard}">
+					<StackPanel>
+						<TextBlock Text="Provider" Style="{StaticResource DialogLabel}" />
+						<ComboBox x:Name="ProviderBox"
+							Style="{StaticResource DialogCombo}"
+							Margin="0,0,0,8"
+							SelectionChanged="ProviderBox_SelectionChanged"
+							AutomationProperties.Name="Provider" />
+						<TextBlock x:Name="CapsText"
+							FontSize="11"
+							Foreground="{DynamicResource SecondaryTextBrush}"
+							TextWrapping="Wrap"
+							Margin="0,0,0,12" />
+
+						<TextBlock x:Name="UserLabel" Text="Username / email" Style="{StaticResource DialogLabel}" />
+						<TextBox x:Name="UserBox"
+							Style="{StaticResource DialogInput}"
+							Margin="0,0,0,12"
+							AutomationProperties.Name="Username" />
+
+						<TextBlock Text="Password / master password" Style="{StaticResource DialogLabel}" />
+						<PasswordBox x:Name="PassBox"
+							Style="{StaticResource DialogPassword}"
+							Margin="0,0,0,12"
+							AutomationProperties.Name="Password" />
+
+						<TextBlock x:Name="PathLabel" Text="Vault / export file" Style="{StaticResource DialogLabel}" />
+						<Grid Margin="0,0,0,12">
+							<Grid.ColumnDefinitions>
+								<ColumnDefinition Width="*" />
+								<ColumnDefinition Width="Auto" />
+							</Grid.ColumnDefinitions>
+							<TextBox x:Name="PathBox"
+								Style="{StaticResource DialogInput}"
+								VerticalAlignment="Center"
+								AutomationProperties.Name="Vault or export file" />
+							<Button Grid.Column="1"
+								Content="Browse…"
+								Margin="8,0,0,0"
+								Style="{StaticResource SecondaryButton}"
+								Click="BrowsePath_Click"
+								AutomationProperties.Name="Browse vault file" />
+						</Grid>
+
+						<StackPanel x:Name="KeyFilePanel">
+							<TextBlock Text="Key file (optional)" Style="{StaticResource DialogLabel}" />
+							<Grid Margin="0,0,0,4">
+								<Grid.ColumnDefinitions>
+									<ColumnDefinition Width="*" />
+									<ColumnDefinition Width="Auto" />
+								</Grid.ColumnDefinitions>
+								<TextBox x:Name="KeyBox"
+									Style="{StaticResource DialogInput}"
+									VerticalAlignment="Center"
+									AutomationProperties.Name="Key file" />
+								<Button Grid.Column="1"
+									Content="Browse…"
+									Margin="8,0,0,0"
+									Style="{StaticResource SecondaryButton}"
+									Click="BrowseKey_Click"
+									AutomationProperties.Name="Browse key file" />
+							</Grid>
+						</StackPanel>
+
+						<CheckBox
+							x:Name="ImportAfterConnectCheck"
+							Margin="0,12,0,0"
+							Content="Import / sync entries after connecting"
+							IsChecked="True"
+							Style="{StaticResource DialogCheck}"
+							Visibility="Collapsed" />
+					</StackPanel>
+				</Border>
+			</StackPanel>
+		</ScrollViewer>
+	</Grid>
 </Window>

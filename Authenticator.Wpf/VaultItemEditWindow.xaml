@@ -1,47 +1,133 @@
 <Window x:Class="Authenticator.VaultItemEditWindow"
 	xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
 	xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-	xmlns:syncfusion="http://schemas.syncfusion.com/wpf"
-	xmlns:syncfusionskin="clr-namespace:Syncfusion.SfSkinManager;assembly=Syncfusion.SfSkinManager.WPF"
 	Title="Vault item"
 	Width="480"
-	Height="560"
+	Height="600"
+	MinWidth="420"
+	MinHeight="480"
 	WindowStartupLocation="CenterOwner"
+	ShowInTaskbar="False"
 	Background="{DynamicResource PageBackgroundBrush}"
 	Foreground="{DynamicResource PrimaryTextBrush}"
-	syncfusionskin:SfSkinManager.Theme="{syncfusionskin:SkinManagerExtension ThemeName=Windows11Light}">
-	<ScrollViewer Margin="16">
-		<StackPanel>
-			<TextBlock Text="Type" />
-			<ComboBox x:Name="TypeBox" Margin="0,0,0,8" />
-			<TextBlock Text="Title" />
-			<TextBox x:Name="TitleBox" Margin="0,0,0,8" />
-			<TextBlock Text="Username" />
-			<TextBox x:Name="UserBox" Margin="0,0,0,8" />
-			<TextBlock Text="Password" />
-			<Grid Margin="0,0,0,8">
-				<Grid.ColumnDefinitions>
-					<ColumnDefinition Width="*" />
-					<ColumnDefinition Width="Auto" />
-					<ColumnDefinition Width="Auto" />
-				</Grid.ColumnDefinitions>
-				<TextBox x:Name="PassBox" />
-				<syncfusion:ButtonAdv Grid.Column="1" Label="Reveal" Margin="4,0,0,0" Click="RevealPass_Click" SizeMode="Normal" />
-				<syncfusion:ButtonAdv Grid.Column="2" Label="Gen" Margin="4,0,0,0" Click="Generate_Click" SizeMode="Normal" />
+	FontFamily="Segoe UI"
+	FontSize="14">
+	<Grid>
+		<Grid.RowDefinitions>
+			<RowDefinition Height="Auto" />
+			<RowDefinition Height="*" />
+		</Grid.RowDefinitions>
+
+		<Border Style="{StaticResource DialogHeader}">
+			<Grid>
+				<Button Content="Cancel"
+					HorizontalAlignment="Left"
+					IsCancel="True"
+					Style="{StaticResource TextActionButton}"
+					AutomationProperties.Name="Cancel"
+					Click="Cancel_Click" />
+				<TextBlock Text="Vault item"
+					FontSize="17"
+					FontWeight="SemiBold"
+					HorizontalAlignment="Center"
+					VerticalAlignment="Center" />
+				<Button Content="Save"
+					HorizontalAlignment="Right"
+					IsDefault="True"
+					Style="{StaticResource TextActionButton}"
+					AutomationProperties.Name="Save"
+					Click="Save_Click" />
 			</Grid>
-			<TextBlock Text="URL" />
-			<TextBox x:Name="UrlBox" Margin="0,0,0,8" />
-			<TextBlock Text="Notes" />
-			<TextBox x:Name="NotesBox" Height="80" TextWrapping="Wrap" AcceptsReturn="True" Margin="0,0,0,8" />
-			<TextBlock Text="TOTP secret (optional)" />
-			<TextBox x:Name="TotpBox" Margin="0,0,0,8" />
-			<TextBlock Text="Linked 2FA account id (optional)" />
-			<TextBox x:Name="LinkedBox" Margin="0,0,0,8" />
-			<CheckBox x:Name="FavoriteCheck" Content="Favorite" Margin="0,0,0,12" />
-			<StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
-				<syncfusion:ButtonAdv Label="Cancel" Margin="0,0,8,0" IsCancel="True" SizeMode="Normal" Click="Cancel_Click" />
-				<syncfusion:ButtonAdv Label="Save" Click="Save_Click" SizeMode="Normal" />
+		</Border>
+
+		<ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" Padding="16,12,16,16">
+			<StackPanel>
+				<Border Style="{StaticResource DialogCard}">
+					<StackPanel>
+						<TextBlock Text="Type" Style="{StaticResource DialogLabel}" />
+						<ComboBox x:Name="TypeBox"
+							Style="{StaticResource DialogCombo}"
+							Margin="0,0,0,12"
+							AutomationProperties.Name="Type" />
+
+						<TextBlock Text="Title" Style="{StaticResource DialogLabel}" />
+						<TextBox x:Name="TitleBox"
+							Style="{StaticResource DialogInput}"
+							Margin="0,0,0,12"
+							AutomationProperties.Name="Title" />
+
+						<TextBlock Text="Username" Style="{StaticResource DialogLabel}" />
+						<TextBox x:Name="UserBox"
+							Style="{StaticResource DialogInput}"
+							Margin="0,0,0,12"
+							AutomationProperties.Name="Username" />
+
+						<TextBlock Text="Password" Style="{StaticResource DialogLabel}" />
+						<Grid Margin="0,0,0,12">
+							<Grid.ColumnDefinitions>
+								<ColumnDefinition Width="*" />
+								<ColumnDefinition Width="Auto" />
+								<ColumnDefinition Width="Auto" />
+							</Grid.ColumnDefinitions>
+							<TextBox x:Name="PassBox"
+								Style="{StaticResource DialogInput}"
+								AutomationProperties.Name="Password" />
+							<Button x:Name="RevealPassButton"
+								Grid.Column="1"
+								Content="Reveal"
+								Margin="8,0,0,0"
+								Style="{StaticResource SecondaryButton}"
+								Click="RevealPass_Click"
+								AutomationProperties.Name="Reveal password" />
+							<Button Grid.Column="2"
+								Content="Gen"
+								Margin="8,0,0,0"
+								Style="{StaticResource SecondaryButton}"
+								Click="Generate_Click"
+								ToolTip="Generate password"
+								AutomationProperties.Name="Generate password" />
+						</Grid>
+
+						<TextBlock Text="URL" Style="{StaticResource DialogLabel}" />
+						<TextBox x:Name="UrlBox"
+							Style="{StaticResource DialogInput}"
+							AutomationProperties.Name="URL" />
+					</StackPanel>
+				</Border>
+
+				<Border Style="{StaticResource DialogCard}" Margin="0,12,0,0">
+					<StackPanel>
+						<TextBlock Text="Notes" Style="{StaticResource DialogLabel}" />
+						<TextBox x:Name="NotesBox"
+							Style="{StaticResource DialogInput}"
+							Height="88"
+							TextWrapping="Wrap"
+							AcceptsReturn="True"
+							VerticalScrollBarVisibility="Auto"
+							VerticalContentAlignment="Top"
+							Margin="0,0,0,12"
+							AutomationProperties.Name="Notes" />
+
+						<TextBlock Text="TOTP secret (optional)" Style="{StaticResource DialogLabel}" />
+						<TextBox x:Name="TotpBox"
+							Style="{StaticResource DialogInput}"
+							Margin="0,0,0,12"
+							AutomationProperties.Name="TOTP secret" />
+
+						<TextBlock Text="Linked 2FA account id (optional)" Style="{StaticResource DialogLabel}" />
+						<TextBox x:Name="LinkedBox"
+							Style="{StaticResource DialogInput}"
+							Margin="0,0,0,12"
+							AutomationProperties.Name="Linked 2FA account id" />
+
+						<CheckBox x:Name="FavoriteCheck"
+							Content="Favorite"
+							Style="{StaticResource DialogCheck}"
+							Margin="0"
+							AutomationProperties.Name="Favorite" />
+					</StackPanel>
+				</Border>
 			</StackPanel>
-		</StackPanel>
-	</ScrollViewer>
+		</ScrollViewer>
+	</Grid>
 </Window>

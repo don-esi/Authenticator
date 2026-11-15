@@ -1,4 +1,5 @@
 using System.Windows;
+using System.Windows.Automation;
 using System.Windows.Controls;
 using Authenticator.Services;
 using Authenticator.Services.Providers;
@@ -18,13 +19,14 @@ public partial class ProviderConnectWindow : Window
     {
         _mode = mode;
         InitializeComponent();
-        SyncfusionBootstrap.ApplyTo(this);
 
         Title = mode == ProviderDialogMode.Connect ? "Connect to password manager" : "Import from password manager";
+        TitleText.Text = mode == ProviderDialogMode.Connect ? "Connect" : "Import";
         ModeHint.Text = mode == ProviderDialogMode.Connect
             ? "Credentials are stored on this PC (DPAPI) and the provider stays connected until you Disconnect."
             : "One-shot import only. Credentials are not retained after the import finishes.";
-        PrimaryButton.Label = mode == ProviderDialogMode.Connect ? "Connect" : "Import";
+        PrimaryButton.Content = mode == ProviderDialogMode.Connect ? "Connect" : "Import";
+        AutomationProperties.SetName(PrimaryButton, (string)PrimaryButton.Content);
         ImportAfterConnectCheck.Visibility = mode == ProviderDialogMode.Connect
             ? Visibility.Visible
             : Visibility.Collapsed;

@@ -13,7 +13,6 @@ public partial class VaultItemEditWindow : Window
     public VaultItemEditWindow(VaultItem item)
     {
         InitializeComponent();
-        SyncfusionBootstrap.ApplyTo(this);
         _item = item;
         foreach (VaultItemType t in Enum.GetValues(typeof(VaultItemType)))
             TypeBox.Items.Add(t);
@@ -37,6 +36,7 @@ public partial class VaultItemEditWindow : Window
     private void RevealPass_Click(object sender, RoutedEventArgs e)
     {
         _passRevealed = !_passRevealed;
+        RevealPassButton.Content = _passRevealed ? "Hide" : "Reveal";
         MessageBox.Show(this, _passRevealed ? "Password field visible." : "Toggle noted.", "Un-hide");
     }
 

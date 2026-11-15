@@ -19,7 +19,7 @@
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
 
-        <Border Background="White" BorderBrush="#E5E7EB" BorderThickness="0,0,0,1" Padding="8,6">
+        <Border Style="{StaticResource DialogHeader}" Padding="8,6">
             <Grid>
                 <Button Content="Cancel"
                         HorizontalAlignment="Left"
@@ -43,33 +43,33 @@
 
         <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" Padding="16,12,16,16">
             <StackPanel>
-                <Border Background="#F4F6FC" CornerRadius="16" Padding="16">
+                <Border Style="{StaticResource DialogCard}">
                     <StackPanel>
-                        <TextBlock Text="Service name" Foreground="#6B7280" />
+                        <TextBlock Text="Service name" Style="{StaticResource DialogLabel}" />
                         <TextBox x:Name="ServiceNameBox"
                                  Style="{StaticResource FieldBox}"
                                  MaxLength="200"
                                  Margin="0,2,0,8"
                                  AutomationProperties.Name="Service name" />
-                        <Border Height="1" Background="#E5E7EB" Margin="0,0,0,8" />
+                        <Border Height="1" Background="{DynamicResource BorderBrushColor}" Margin="0,0,0,8" />
 
-                        <TextBlock Text="URL" Foreground="#6B7280" />
+                        <TextBlock Text="URL" Style="{StaticResource DialogLabel}" />
                         <TextBox x:Name="ServiceUrlBox"
                                  Style="{StaticResource FieldBox}"
                                  MaxLength="500"
                                  Margin="0,2,0,8"
                                  AutomationProperties.Name="URL" />
-                        <Border Height="1" Background="#E5E7EB" Margin="0,0,0,8" />
+                        <Border Height="1" Background="{DynamicResource BorderBrushColor}" Margin="0,0,0,8" />
 
-                        <TextBlock Text="Username" Foreground="#6B7280" />
+                        <TextBlock Text="Username" Style="{StaticResource DialogLabel}" />
                         <TextBox x:Name="UsernameBox"
                                  Style="{StaticResource FieldBox}"
                                  MaxLength="200"
                                  Margin="0,2,0,8"
                                  AutomationProperties.Name="Username" />
-                        <Border Height="1" Background="#E5E7EB" Margin="0,0,0,8" />
+                        <Border Height="1" Background="{DynamicResource BorderBrushColor}" Margin="0,0,0,8" />
 
-                        <TextBlock Text="Secret key" Foreground="#6B7280" />
+                        <TextBlock Text="Secret key" Style="{StaticResource DialogLabel}" />
                         <TextBox x:Name="SecretKeyBox"
                                  Style="{StaticResource FieldBox}"
                                  AcceptsReturn="True"
@@ -78,10 +78,11 @@
                                  VerticalScrollBarVisibility="Auto"
                                  Margin="0,2,0,8"
                                  AutomationProperties.Name="Secret key" />
-                        <Border Height="1" Background="#E5E7EB" Margin="0,0,0,8" />
+                        <Border Height="1" Background="{DynamicResource BorderBrushColor}" Margin="0,0,0,8" />
 
-                        <TextBlock Text="Folder" Foreground="#6B7280" />
+                        <TextBlock Text="Folder" Style="{StaticResource DialogLabel}" />
                         <ComboBox x:Name="FolderBox"
+                                  Style="{StaticResource DialogCombo}"
                                   Margin="0,6,0,0"
                                   HorizontalAlignment="Stretch"
                                   SelectionChanged="FolderBox_SelectionChanged"
@@ -89,7 +90,7 @@
                     </StackPanel>
                 </Border>
 
-                <Border Background="#F4F6FC" CornerRadius="16" Padding="16" Margin="0,12,0,0">
+                <Border Style="{StaticResource DialogCard}" Margin="0,12,0,0">
                     <StackPanel>
                         <TextBlock Text="Advanced options" FontWeight="SemiBold" FontSize="16" Margin="0,0,0,12" />
                         <Grid Margin="0,0,0,8">
@@ -98,7 +99,7 @@
                                 <ColumnDefinition Width="*" />
                             </Grid.ColumnDefinitions>
                             <TextBlock Text="Algorithm" VerticalAlignment="Center" />
-                            <Border Grid.Column="1" Background="White" CornerRadius="10" Padding="2">
+                            <Border Grid.Column="1" Background="{DynamicResource NavBarBackgroundBrush}" CornerRadius="10" Padding="2">
                                 <StackPanel x:Name="AlgorithmPanel" Orientation="Horizontal" />
                             </Border>
                         </Grid>
@@ -108,7 +109,7 @@
                                 <ColumnDefinition Width="*" />
                             </Grid.ColumnDefinitions>
                             <TextBlock Text="Digits" VerticalAlignment="Center" />
-                            <Border Grid.Column="1" Background="White" CornerRadius="10" Padding="2">
+                            <Border Grid.Column="1" Background="{DynamicResource NavBarBackgroundBrush}" CornerRadius="10" Padding="2">
                                 <StackPanel x:Name="DigitsPanel" Orientation="Horizontal" />
                             </Border>
                         </Grid>
@@ -118,43 +119,45 @@
                                 <ColumnDefinition Width="*" />
                             </Grid.ColumnDefinitions>
                             <TextBlock Text="Period" VerticalAlignment="Center" />
-                            <Border Grid.Column="1" Background="White" CornerRadius="10" Padding="2">
+                            <Border Grid.Column="1" Background="{DynamicResource NavBarBackgroundBrush}" CornerRadius="10" Padding="2">
                                 <StackPanel x:Name="PeriodPanel" Orientation="Horizontal" />
                             </Border>
                         </Grid>
                     </StackPanel>
                 </Border>
 
-                <Border Background="#F4F6FC" CornerRadius="16" Padding="16" Margin="0,12,0,0">
+                <Border Style="{StaticResource DialogCard}" Margin="0,12,0,0">
                     <StackPanel>
                         <TextBlock Text="Backup codes" FontWeight="SemiBold" FontSize="16" />
                         <TextBlock Text="One code per line. A code that was already used stays used if you leave the line."
-                                   Foreground="#6B7280"
+                                   Foreground="{DynamicResource SecondaryTextBrush}"
                                    TextWrapping="Wrap"
                                    Margin="0,4,0,8" />
                         <TextBox x:Name="BackupCodesBox"
+                                 Style="{StaticResource DialogInput}"
                                  AcceptsReturn="True"
                                  TextWrapping="Wrap"
                                  Height="120"
                                  VerticalScrollBarVisibility="Auto"
-                                 Padding="8"
+                                 VerticalContentAlignment="Top"
                                  AutomationProperties.Name="Backup codes" />
                     </StackPanel>
                 </Border>
 
-                <Border Background="#F4F6FC" CornerRadius="16" Padding="16" Margin="0,12,0,0">
+                <Border Style="{StaticResource DialogCard}" Margin="0,12,0,0">
                     <StackPanel>
                         <TextBlock Text="QR code" FontWeight="SemiBold" FontSize="16" />
                         <TextBlock Text="Paste an otpauth:// link, choose an image, or drag around a QR code on the screen."
-                                   Foreground="#6B7280"
+                                   Foreground="{DynamicResource SecondaryTextBrush}"
                                    TextWrapping="Wrap"
                                    Margin="0,4,0,8" />
                         <TextBox x:Name="OtpAuthBox"
+                                 Style="{StaticResource DialogInput}"
                                  AcceptsReturn="True"
                                  TextWrapping="Wrap"
                                  Height="72"
                                  VerticalScrollBarVisibility="Auto"
-                                 Padding="8"
+                                 VerticalContentAlignment="Top"
                                  AutomationProperties.Name="otpauth URI" />
                         <Button Content="Fill from link"
                                 Margin="0,8,0,0"
@@ -178,7 +181,7 @@
                 </Border>
 
                 <TextBlock x:Name="ErrorText"
-                           Foreground="#B00020"
+                           Foreground="{DynamicResource DangerBrush}"
                            TextWrapping="Wrap"
                            Margin="4,12,4,0" />
 
@@ -187,7 +190,7 @@
                         Margin="0,16,0,0"
                         HorizontalAlignment="Center"
                         Visibility="Collapsed"
-                        Foreground="#B00020"
+                        Foreground="{DynamicResource DangerBrush}"
                         Style="{StaticResource TextActionButton}"
                         AutomationProperties.Name="Delete account"
                         Click="Delete_Click" />
