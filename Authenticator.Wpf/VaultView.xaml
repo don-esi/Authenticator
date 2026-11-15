@@ -38,11 +38,10 @@
 			</Setter>
 		</Style>
 
-		<Style x:Key="VaultFavoriteStarButton" TargetType="Button" BasedOn="{StaticResource IconButton}">
+		<Style x:Key="VaultRowIconButton" TargetType="Button" BasedOn="{StaticResource IconButton}">
 			<Setter Property="Padding" Value="4,0" />
 			<Setter Property="MinWidth" Value="28" />
 			<Setter Property="VerticalAlignment" Value="Center" />
-			<Setter Property="ToolTip" Value="Favorite" />
 		</Style>
 
 		<!-- Same slide pattern as 2FA codes: actions behind card, revealed on swipe. -->
@@ -54,11 +53,6 @@
 							Opacity="0"
 							IsHitTestVisible="False"
 							Tag="SlideActions">
-					<Button Width="44" Margin="0,0,4,0" VerticalAlignment="Stretch" Tag="{Binding}"
-							Click="SlideCopy_Click" Style="{StaticResource SlideActionButton}"
-							Background="#0078D4" ToolTip="Copy password" AutomationProperties.Name="Copy password">
-						<TextBlock FontFamily="Segoe MDL2 Assets" FontSize="16" Foreground="White" Text="&#xE8C8;" />
-					</Button>
 					<Button Width="44" Margin="0,0,4,0" VerticalAlignment="Stretch" Tag="{Binding}"
 							Click="SlideEdit_Click" Style="{StaticResource SlideActionButton}"
 							Background="#9CA3AF" ToolTip="Edit" AutomationProperties.Name="Edit item">
@@ -93,29 +87,40 @@
 										   HorizontalAlignment="Center" VerticalAlignment="Center" />
 							</Border>
 							<Border Width="14" Height="14" HorizontalAlignment="Left" VerticalAlignment="Top"
-									Margin="-2,-2,0,0" CornerRadius="4" Background="#1A73E8"
-									Visibility="{Binding BadgeVisibility}">
+									Margin="-2,-2,0,0" CornerRadius="4" Background="{Binding BadgeBrush}">
 								<TextBlock FontFamily="Segoe MDL2 Assets" FontSize="8" Foreground="White"
-										   Text="&#xE8D7;" HorizontalAlignment="Center" VerticalAlignment="Center" />
+										   Text="{Binding BadgeGlyph}" HorizontalAlignment="Center" VerticalAlignment="Center" />
 							</Border>
 						</Grid>
 
-						<!-- Reference hierarchy: host/title muted, username prominent -->
+						<!-- Title prominent; username muted. Click row copies username. -->
 						<StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="0,0,8,0">
-							<TextBlock Text="{Binding Subtitle}" FontSize="12"
-									   Foreground="{DynamicResource SecondaryTextBrush}"
-									   TextTrimming="CharacterEllipsis" />
-							<TextBlock Text="{Binding Identity}" FontSize="16" FontWeight="SemiBold"
+							<TextBlock Text="{Binding SortTitle}" FontSize="16" FontWeight="SemiBold"
 									   Foreground="{DynamicResource PrimaryTextBrush}"
+									   TextTrimming="CharacterEllipsis" />
+							<TextBlock Text="{Binding Identity}" FontSize="12"
+									   Foreground="{DynamicResource SecondaryTextBrush}"
 									   TextTrimming="CharacterEllipsis" Margin="0,2,0,0" />
 						</StackPanel>
 
-						<Button Grid.Column="2"
-								Style="{StaticResource VaultFavoriteStarButton}"
-								Tag="{Binding}"
-								Click="Favorite_Click">
-							<TextBlock Text="{Binding Star}" Foreground="{Binding StarBrush}" FontSize="16" />
-						</Button>
+						<StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
+							<Button Style="{StaticResource VaultRowIconButton}"
+									Tag="{Binding}"
+									ToolTip="Copy password"
+									AutomationProperties.Name="Copy password"
+									Click="CopyPassword_Click">
+								<TextBlock FontFamily="Segoe MDL2 Assets" FontSize="16"
+										   Foreground="{DynamicResource SecondaryTextBrush}"
+										   Text="&#xE8C8;" />
+							</Button>
+							<Button Style="{StaticResource VaultRowIconButton}"
+									Tag="{Binding}"
+									ToolTip="Favorite"
+									AutomationProperties.Name="Favorite"
+									Click="Favorite_Click">
+								<TextBlock Text="{Binding Star}" Foreground="{Binding StarBrush}" FontSize="16" />
+							</Button>
+						</StackPanel>
 					</Grid>
 				</Border>
 			</Grid>
@@ -165,30 +170,47 @@
 		</Grid>
 
 		<!-- Virtualizing panel (ScrollViewer inside template) — avoids realizing every card on All items. -->
-		<ItemsControl
-			x:Name="ItemsList"
-			Grid.Row="3"
-			ItemTemplate="{StaticResource VaultItemTemplate}"
-			VirtualizingPanel.IsVirtualizing="True"
-			VirtualizingPanel.VirtualizationMode="Recycling"
-			VirtualizingPanel.ScrollUnit="Pixel"
-			ScrollViewer.CanContentScroll="True">
-			<ItemsControl.ItemsPanel>
-				<ItemsPanelTemplate>
-					<VirtualizingStackPanel />
-				</ItemsPanelTemplate>
-			</ItemsControl.ItemsPanel>
-			<ItemsControl.Template>
-				<ControlTemplate TargetType="ItemsControl">
-					<ScrollViewer
-						CanContentScroll="True"
-						Focusable="False"
-						HorizontalScrollBarVisibility="Disabled"
-						VerticalScrollBarVisibility="Auto">
-						<ItemsPresenter />
-					</ScrollViewer>
-				</ControlTemplate>
-			</ItemsControl.Template>
-		</ItemsControl>
+		<Grid Grid.Row="3">
+			<ItemsControl
+				x:Name="ItemsList"
+				ItemTemplate="{StaticResource VaultItemTemplate}"
+				VirtualizingPanel.IsVirtualizing="True"
+				VirtualizingPanel.VirtualizationMode="Recycling"
+				VirtualizingPanel.ScrollUnit="Pixel"
+				ScrollViewer.CanContentScroll="True">
+				<ItemsControl.ItemsPanel>
+					<ItemsPanelTemplate>
+						<VirtualizingStackPanel />
+					</ItemsPanelTemplate>
+				</ItemsControl.ItemsPanel>
+				<ItemsControl.Template>
+					<ControlTemplate TargetType="ItemsControl">
+						<ScrollViewer
+							CanContentScroll="True"
+							Focusable="False"
+							HorizontalScrollBarVisibility="Disabled"
+							VerticalScrollBarVisibility="Auto">
+							<ItemsPresenter />
+						</ScrollViewer>
+					</ControlTemplate>
+				</ItemsControl.Template>
+			</ItemsControl>
+			<Border x:Name="StatusToast"
+					HorizontalAlignment="Center"
+					VerticalAlignment="Bottom"
+					Margin="0,0,0,16"
+					Padding="18,10"
+					Background="{DynamicResource ToastBackgroundBrush}"
+					CornerRadius="20"
+					Opacity="0.92"
+					IsHitTestVisible="False"
+					Visibility="Collapsed">
+				<TextBlock x:Name="ToastText"
+						   Text="Copied"
+						   Foreground="White"
+						   FontSize="14"
+						   FontWeight="SemiBold" />
+			</Border>
+		</Grid>
 	</Grid>
 </UserControl>

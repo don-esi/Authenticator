@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.ComponentModel;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
@@ -7,6 +8,7 @@ using System.Windows.Media;
 using System.Windows.Threading;
 using Authenticator.Crypto;
 using Authenticator.Data.Models;
+using Authenticator.Logging;
 using Authenticator.Services;
 using Authenticator.Services.Providers;
 
@@ -22,7 +24,7 @@ public partial class VaultView : UserControl
         Recents
     }
 
-    private const double SlideActionWidth = 140;
+    private const double SlideActionWidth = 92;
     private const double SlideOpenThreshold = 0.45;
 
     private readonly VaultItemService _vault = new();
@@ -35,6 +37,7 @@ public partial class VaultView : UserControl
     private IReadOnlyList<string> _autoMatchTerms = Array.Empty<string>();
     private bool _chipSync;
     private readonly DispatcherTimer _searchDebounce;
+    private readonly DispatcherTimer _toastTimer;
 
     private Border? _slideFront;
     private TranslateTransform? _slideTransform;
@@ -53,6 +56,8 @@ public partial class VaultView : UserControl
             _searchDebounce.Stop();
             ApplyFilter();
         };
+        _toastTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(1400) };
+        _toastTimer.Tick += (_, _) => HideStatusToast();
         ForegroundWindowMonitor.Instance.ForegroundChanged += (_, info) =>
         {
             _autoFilter = info.UrlHint;
@@ -194,7 +199,7 @@ public partial class VaultView : UserControl
             VaultFilterMode.Recents => _all
                 .Where(i => i.LastUsedAt is not null)
                 .OrderByDescending(i => i.LastUsedAt)
-                .Take(40)
+                .Take(10)
                 .Select(i => _rowById[i.Id]),
             VaultFilterMode.Relevant => FilterRelevantRows(),
             _ => _allRowsView
@@ -424,7 +429,7 @@ public partial class VaultView : UserControl
         {
             CloseOpenSlide();
             if (front.DataContext is VaultRow row)
-                CopyPassword(row);
+                CopyUsername(row);
             return;
         }
 
@@ -501,21 +506,13 @@ public partial class VaultView : UserControl
         return fallback;
     }
 
-    private void SlideCopy_Click(object sender, RoutedEventArgs e)
-    {
-        if (sender is not FrameworkElement { Tag: VaultRow row })
-            return;
-        CloseOpenSlide();
-        ShowCopyMenu(row, sender as UIElement);
-        e.Handled = true;
-    }
-
     private async void SlideEdit_Click(object sender, RoutedEventArgs e)
     {
         if (sender is not FrameworkElement { Tag: VaultRow row })
             return;
         CloseOpenSlide();
-        var item = await LoadItemAsync(row);
+        // Load metadata/notes without decrypting password — Reveal in the editor fetches it.
+        var item = await _vault.GetByIdAsync(row.Id, revealSecrets: true, revealPassword: false);
         if (item is null) return;
         EditItem(item);
         e.Handled = true;
@@ -543,50 +540,74 @@ public partial class VaultView : UserControl
     {
         if (sender is not FrameworkElement { Tag: VaultRow row })
             return;
-        await _vault.SetFavoriteAsync(row.Id, !row.IsFavorite);
-        await ReloadAsync();
+
+        e.Handled = true;
+        CloseOpenSlide();
+
+        var next = !row.IsFavorite;
+        try
+        {
+            await _vault.SetFavoriteAsync(row.Id, next);
+            row.IsFavorite = next;
+            var cached = _all.FirstOrDefault(i => i.Id == row.Id);
+            if (cached is not null)
+                cached.IsFavorite = next;
+
+            // Re-apply so Favorites chip drops unfavorited rows (and picks up new favorites).
+            ApplyFilter();
+            ShowStatusToast(next ? "Added to favorites" : "Removed from favorites");
+        }
+        catch (Exception ex)
+        {
+            LoggingConfiguration.LogException(ex, $"Failed to update favorite for vault item {row.Id}.", nameof(VaultView));
+            MessageBox.Show(Window.GetWindow(this), ex.Message, "Favorite", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+    }
+
+    private void CopyPassword_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not FrameworkElement { Tag: VaultRow row })
+            return;
+        CopyPassword(row);
         e.Handled = true;
     }
 
-    private async void ShowCopyMenu(VaultRow row, UIElement? placement)
+    private async void CopyUsername(VaultRow row)
     {
-        var item = await LoadItemAsync(row);
-        if (item is null) return;
-
-        var menu = new ContextMenu();
-        if (placement is not null)
+        // Username is on the list row — no secret decrypt.
+        var cached = _all.FirstOrDefault(i => i.Id == row.Id);
+        var username = cached?.Username;
+        if (username is null)
         {
-            menu.PlacementTarget = placement;
-            menu.Placement = PlacementMode.Bottom;
+            var item = await _vault.GetByIdAsync(row.Id, revealSecrets: true, revealPassword: false);
+            username = item?.Username;
         }
-        menu.Items.Add(MakeMenu("Copy username", () =>
-        {
-            ClipboardHelper.Copy(item.Username);
-            _ = MarkUsedAsync(row.Id);
-        }));
-        menu.Items.Add(MakeMenu("Copy password", () =>
-        {
-            ClipboardHelper.Copy(item.Password);
-            _ = MarkUsedAsync(row.Id);
-        }));
-        if (!string.IsNullOrWhiteSpace(item.TotpSecret))
-        {
-            menu.Items.Add(MakeMenu("Copy TOTP", () =>
-            {
-                var code = TotpGenerator.TryGenerate(item.TotpSecret, "SHA1", 6, 30);
-                ClipboardHelper.Copy(string.IsNullOrEmpty(code) ? item.TotpSecret : code);
-                _ = MarkUsedAsync(row.Id);
-            }));
-        }
-        menu.IsOpen = true;
+        ClipboardHelper.Copy(username);
+        ShowStatusToast("Username copied");
+        await MarkUsedAsync(row.Id);
     }
 
     private async void CopyPassword(VaultRow row)
     {
-        var item = await LoadItemAsync(row);
-        if (item is null) return;
-        ClipboardHelper.Copy(item.Password);
+        var password = await _vault.GetPasswordAsync(row.Id);
+        if (password is null) return;
+        ClipboardHelper.Copy(password);
+        ShowStatusToast("Password copied");
         await MarkUsedAsync(row.Id);
+    }
+
+    private void ShowStatusToast(string message)
+    {
+        ToastText.Text = message;
+        _toastTimer.Stop();
+        StatusToast.Visibility = Visibility.Visible;
+        _toastTimer.Start();
+    }
+
+    private void HideStatusToast()
+    {
+        _toastTimer.Stop();
+        StatusToast.Visibility = Visibility.Collapsed;
     }
 
     private async Task MarkUsedAsync(Guid id)
@@ -622,7 +643,7 @@ public partial class VaultView : UserControl
 
     public async Task AddNewAsync()
     {
-        var win = new VaultItemEditWindow(new VaultItem { ItemType = VaultItemType.Login })
+        var win = new VaultItemEditWindow(new VaultItem { ItemType = VaultItemType.Login }, isNew: true)
         {
             Owner = Window.GetWindow(this)
         };
@@ -714,8 +735,10 @@ public partial class VaultView : UserControl
         menu.IsOpen = true;
     }
 
-    public sealed class VaultRow
+    public sealed class VaultRow : INotifyPropertyChanged
     {
+        private bool _isFavorite;
+
         public Guid Id { get; set; }
         public string Subtitle { get; set; } = "";
         public string Identity { get; set; } = "";
@@ -724,19 +747,39 @@ public partial class VaultView : UserControl
         /// <summary>Lowercased title/username/host/url blob for partial relevance matching.</summary>
         public string MatchBlob { get; set; } = "";
         public string[] MatchTokens { get; set; } = Array.Empty<string>();
-        public bool IsFavorite { get; set; }
+        public bool IsFavorite
+        {
+            get => _isFavorite;
+            set
+            {
+                if (_isFavorite == value)
+                    return;
+                _isFavorite = value;
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsFavorite)));
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Star)));
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(StarBrush)));
+            }
+        }
         public string Initial { get; set; } = "?";
         public Brush IconBrush { get; set; } = Brushes.Gray;
-        public Visibility BadgeVisibility { get; set; } = Visibility.Collapsed;
-        public string Star { get; set; } = "☆";
-        public Brush StarBrush { get; set; } = Brushes.Gray;
+        public string BadgeGlyph { get; set; } = "\uE77B";
+        public Brush BadgeBrush { get; set; } = AccountEdits.BrushFromHex("#1A73E8");
+        public string Star => IsFavorite ? "★" : "☆";
+        public Brush StarBrush => IsFavorite
+            ? AccountEdits.BrushFromHex("#F5B301")
+            : AccountEdits.BrushFromHex("#9CA3AF");
+
+        public event PropertyChangedEventHandler? PropertyChanged;
 
         public static VaultRow From(VaultItem item)
         {
             var host = TryHost(item.Url);
             var subtitle = !string.IsNullOrWhiteSpace(host) ? host : item.Title;
-            var identity = string.IsNullOrWhiteSpace(item.Username) ? item.Title : item.Username!;
-            var seed = string.IsNullOrWhiteSpace(subtitle) ? identity : subtitle;
+            // Secondary line: username when present, otherwise host (never duplicate the title).
+            var identity = !string.IsNullOrWhiteSpace(item.Username)
+                ? item.Username!
+                : host;
+            var seed = string.IsNullOrWhiteSpace(item.Title) ? identity : item.Title;
             var blob = string.Join(' ',
                 item.Title,
                 item.Username,
@@ -757,15 +800,33 @@ public partial class VaultView : UserControl
                 IsFavorite = item.IsFavorite,
                 Initial = string.IsNullOrWhiteSpace(seed) ? "?" : seed.Trim()[..1].ToUpperInvariant(),
                 IconBrush = AccountEdits.InitialBrush(seed),
-                BadgeVisibility = item.HasMismatch || item.ExternalLinks.Count > 0
-                    ? Visibility.Visible
-                    : Visibility.Collapsed,
-                Star = item.IsFavorite ? "★" : "☆",
-                StarBrush = item.IsFavorite
-                    ? AccountEdits.BrushFromHex("#F5B301")
-                    : AccountEdits.BrushFromHex("#9CA3AF")
+                BadgeGlyph = GlyphFor(item.ItemType),
+                BadgeBrush = item.HasMismatch
+                    ? AccountEdits.BrushFromHex("#B00020")
+                    : AccountEdits.BrushFromHex("#1A73E8")
             };
         }
+
+        private static string GlyphFor(VaultItemType type) => type switch
+        {
+            VaultItemType.Login => "\uE77B",             // Contact
+            VaultItemType.SecureNote => "\uE70B",        // Page
+            VaultItemType.CreditCard => "\uE8C7",        // PaymentCard
+            VaultItemType.Address => "\uE707",           // Home
+            VaultItemType.BankAccount => "\uE825",       // Bank
+            VaultItemType.Server => "\uE968",            // Server
+            VaultItemType.EmailAccount => "\uE715",      // Mail
+            VaultItemType.Database => "\uE81E",          // ScrollMode / data list
+            VaultItemType.InstantMessenger => "\uE8BD",  // Message
+            VaultItemType.SshKey => "\uE8D7",            // Permissions (key)
+            VaultItemType.Wifi => "\uE701",              // Wifi
+            VaultItemType.Membership => "\uE8F2",        // People
+            VaultItemType.Passport => "\uE734",          // Globe
+            VaultItemType.DriverLicense => "\uE8EC",     // ContactCard
+            VaultItemType.Insurance => "\uE72E",         // Admin / shield
+            VaultItemType.HealthInsurance => "\uE95E",   // Medical
+            _ => "\uE8B7"                                // More
+        };
 
         private static string TryHost(string? url)
         {

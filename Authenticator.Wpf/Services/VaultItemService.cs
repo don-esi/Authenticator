@@ -20,7 +20,7 @@ public sealed class VaultItemService
     }
 
     /// <param name="revealSecrets">
-    /// When false (list UI), skip decrypting password/notes — avoids CPU spike on every filter/tab switch.
+    /// When false (list UI), strip secret fields from memory — filter/tab switches stay cheap.
     /// Call <see cref="GetByIdAsync"/> before copy/edit.
     /// </param>
     public async Task<List<VaultItem>> GetItemsAsync(
@@ -29,26 +29,45 @@ public sealed class VaultItemService
         bool revealSecrets = true,
         CancellationToken ct = default)
     {
+        List<VaultItem> items;
         if (ConnectionConfig.IsOfflineMode)
-            return await _offline.GetItemsAsync(favoritesOnly, includeDeleted, ct);
+        {
+            items = await _offline.GetItemsAsync(favoritesOnly, includeDeleted, ct);
+        }
+        else
+        {
+            await using var db = new AuthenticatorDbContext();
+            IQueryable<VaultItem> q = db.VaultItems.AsNoTracking().Include(i => i.ExternalLinks);
+            if (revealSecrets)
+                q = q.Include(i => i.Folder).Include(i => i.CustomFields);
+            if (!includeDeleted) q = q.Where(i => !i.IsDeleted);
+            if (favoritesOnly) q = q.Where(i => i.IsFavorite);
+            items = await q.OrderBy(i => i.Title).ToListAsync(ct);
+        }
 
-        await using var db = new AuthenticatorDbContext();
-        IQueryable<VaultItem> q = db.VaultItems.AsNoTracking().Include(i => i.ExternalLinks);
-        if (revealSecrets)
-            q = q.Include(i => i.Folder).Include(i => i.CustomFields);
-        if (!includeDeleted) q = q.Where(i => !i.IsDeleted);
-        if (favoritesOnly) q = q.Where(i => i.IsFavorite);
-        var items = await q.OrderBy(i => i.Title).ToListAsync(ct);
         foreach (var item in items)
         {
             if (revealSecrets)
-                Reveal(item);
+                Reveal(item, includePassword: true);
+            else
+                ClearSecrets(item);
             item.HasMismatch = item.ExternalLinks.Any(l => l.IsMismatch);
         }
         return items;
     }
 
-    public async Task<VaultItem?> GetByIdAsync(Guid id, CancellationToken ct = default)
+    public Task<VaultItem?> GetByIdAsync(Guid id, CancellationToken ct = default) =>
+        GetByIdAsync(id, revealSecrets: true, revealPassword: true, ct);
+
+    /// <param name="revealPassword">
+    /// When false, decrypt notes/TOTP/etc. but leave <see cref="VaultItem.Password"/> encrypted
+    /// until <see cref="GetPasswordAsync"/> or a full reveal.
+    /// </param>
+    public async Task<VaultItem?> GetByIdAsync(
+        Guid id,
+        bool revealSecrets,
+        bool revealPassword,
+        CancellationToken ct = default)
     {
         VaultItem? item;
         if (ConnectionConfig.IsOfflineMode)
@@ -67,10 +86,18 @@ public sealed class VaultItemService
 
         if (item is not null)
         {
-            Reveal(item);
+            if (revealSecrets)
+                Reveal(item, revealPassword);
             item.HasMismatch = item.ExternalLinks.Any(l => l.IsMismatch);
         }
         return item;
+    }
+
+    /// <summary>Decrypts and returns the password only — used by copy / editor Reveal.</summary>
+    public async Task<string?> GetPasswordAsync(Guid id, CancellationToken ct = default)
+    {
+        var item = await GetByIdAsync(id, revealSecrets: true, revealPassword: true, ct);
+        return item?.Password;
     }
 
     public async Task<VaultItem> SaveAsync(VaultItem item, CancellationToken ct = default)
@@ -107,16 +134,28 @@ public sealed class VaultItemService
             }
         }
         await db.SaveChangesAsync(ct);
-        Reveal(item);
+        Reveal(item, includePassword: true);
         await _offline.MirrorItemAsync(item, ct);
         return item;
     }
 
     public async Task SetFavoriteAsync(Guid id, bool favorite, CancellationToken ct = default)
     {
-        var item = await GetByIdAsync(id, ct) ?? throw new InvalidOperationException("Item not found.");
+        // Patch only — avoid GetById/Save decrypt+reseal of secrets just to flip a star.
+        var now = DateTime.UtcNow;
+        if (ConnectionConfig.IsOfflineMode)
+        {
+            await _offline.SetFavoriteAsync(id, favorite, now, ct);
+            return;
+        }
+
+        await using var db = new AuthenticatorDbContext();
+        var item = await db.VaultItems.FirstOrDefaultAsync(i => i.Id == id, ct)
+            ?? throw new InvalidOperationException("Item not found.");
         item.IsFavorite = favorite;
-        await SaveAsync(item, ct);
+        item.ModifiedAt = now;
+        await db.SaveChangesAsync(ct);
+        await _offline.SetFavoriteAsync(id, favorite, now, ct);
     }
 
     /// <summary>Records credential use for Recents without bumping <see cref="VaultItem.ModifiedAt"/>.</summary>
@@ -211,11 +250,11 @@ public sealed class VaultItemService
             field.Value = _secrets.Protect(field.Value);
     }
 
-    private void Reveal(VaultItem item)
+    private void Reveal(VaultItem item, bool includePassword)
     {
         try
         {
-            if (!string.IsNullOrEmpty(item.Password) && _secrets.IsEncrypted(item.Password))
+            if (includePassword && !string.IsNullOrEmpty(item.Password) && _secrets.IsEncrypted(item.Password))
                 item.Password = _secrets.Unprotect(item.Password);
             if (!string.IsNullOrEmpty(item.TotpSecret) && _secrets.IsEncrypted(item.TotpSecret))
                 item.TotpSecret = _secrets.Unprotect(item.TotpSecret);
@@ -232,6 +271,19 @@ public sealed class VaultItemService
         catch (Exception ex)
         {
             LoggingConfiguration.LogException(ex, $"Failed to reveal vault item {item.Id}.", nameof(VaultItemService));
+        }
+    }
+
+    private static void ClearSecrets(VaultItem item)
+    {
+        item.Password = null;
+        item.TotpSecret = null;
+        item.Notes = null;
+        item.PayloadJson = null;
+        foreach (var f in item.CustomFields)
+        {
+            if (f.IsSecret)
+                f.Value = null;
         }
     }
 }

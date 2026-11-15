@@ -82,6 +82,18 @@ public sealed class OfflineVaultService
         }
     }
 
+    public async Task SetFavoriteAsync(Guid id, bool favorite, DateTime modifiedAtUtc, CancellationToken ct = default)
+    {
+        await EnsureCreatedAsync(ct);
+        await using var db = new OfflineVaultDbContext();
+        var item = await db.VaultItems.FirstOrDefaultAsync(i => i.Id == id, ct);
+        if (item is null)
+            return;
+        item.IsFavorite = favorite;
+        item.ModifiedAt = modifiedAtUtc;
+        await db.SaveChangesAsync(ct);
+    }
+
     public async Task SeedFromSharedAsync(CancellationToken ct = default)
     {
         await EnsureCreatedAsync(ct);

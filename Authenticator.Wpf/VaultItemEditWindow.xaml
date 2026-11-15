@@ -69,15 +69,20 @@
 								<ColumnDefinition Width="Auto" />
 								<ColumnDefinition Width="Auto" />
 							</Grid.ColumnDefinitions>
-							<TextBox x:Name="PassBox"
-								Style="{StaticResource DialogInput}"
+							<PasswordBox x:Name="PassMasked"
+								Style="{StaticResource DialogPassword}"
 								AutomationProperties.Name="Password" />
+							<TextBox x:Name="PassPlain"
+								Style="{StaticResource DialogInput}"
+								Visibility="Collapsed"
+								AutomationProperties.Name="Password (visible)" />
 							<Button x:Name="RevealPassButton"
 								Grid.Column="1"
 								Content="Reveal"
 								Margin="8,0,0,0"
 								Style="{StaticResource SecondaryButton}"
 								Click="RevealPass_Click"
+								ToolTip="Show password"
 								AutomationProperties.Name="Reveal password" />
 							<Button Grid.Column="2"
 								Content="Gen"
