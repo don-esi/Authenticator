@@ -4,40 +4,40 @@ overview: Relocate 2FA to selectable shared SQL Express (LAN-discoverable host),
 todos:
   - id: g0-sql-discovery
     content: "G0: SQL Express stays; installer host vs join roles; LAN discovery beacon + probe; shared-instance bootstrap"
-    status: pending
+    status: completed
   - id: g1-connection
     content: "G1: Connection profile Settings UX + connection.json schema + discover/test/fallback hooks"
-    status: pending
+    status: completed
   - id: g2-schema-vdek
     content: "G2: Shared vault schema + VDEK promotion/recovery enrollment + local encrypted offline backup"
-    status: pending
+    status: completed
   - id: g3-migrate
     content: "G3: Migrate local 2FA → shared, seed local encrypted backup, preserve favorites"
-    status: pending
+    status: completed
   - id: g4-shell
     content: "G4: Top tabs (2FA | Vault), contextual bottom bar, favorites, offline banner"
-    status: pending
+    status: completed
   - id: g5-providers
     content: "G5: Provider façades for every PasswordManager backend (LastPass, KeyPass, Bitwarden, Dashlane, OnePassword, OpVault, ProtonPass, RoboForm, StickyPassword, TrueKey, ZohoVault); bulk import + favorite mapping where supported"
-    status: pending
+    status: completed
   - id: g6-diff
     content: "G6: Diff/match window (Shared vs any connected provider) + mismatch indicators + single-entry sync"
-    status: pending
+    status: completed
   - id: g7-vault-ui
     content: "G7: Vault item CRUD, un-hide, copy, folders, custom fields, 2FA link"
-    status: pending
+    status: completed
   - id: g8-generator
     content: "G8: Customizable password generator"
-    status: pending
+    status: completed
   - id: g9-offline
     content: "G9: Offline queue + reconnect reconciliation"
-    status: pending
+    status: completed
   - id: g10-foreground
     content: "G10: Foreground-window monitor → auto-filter"
-    status: pending
+    status: completed
   - id: g11-autofill
     content: "G11: Auto-fill / auto-login with optional 2FA completion"
-    status: pending
+    status: completed
 isProject: false
 ---
 
