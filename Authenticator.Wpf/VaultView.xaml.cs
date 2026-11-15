@@ -587,7 +587,7 @@ public partial class VaultView : UserControl
         public string Initial { get; set; } = "?";
         public Brush IconBrush { get; set; } = Brushes.Gray;
         public Visibility BadgeVisibility { get; set; } = Visibility.Collapsed;
-        public string Star { get; set; } = "\uE734";
+        public string Star { get; set; } = "☆";
         public Brush StarBrush { get; set; } = Brushes.Gray;
 
         public static VaultRow From(VaultItem item)
@@ -607,7 +607,7 @@ public partial class VaultView : UserControl
                 BadgeVisibility = item.HasMismatch || item.ExternalLinks.Count > 0
                     ? Visibility.Visible
                     : Visibility.Collapsed,
-                Star = item.IsFavorite ? "\uE735" : "\uE734",
+                Star = item.IsFavorite ? "★" : "☆",
                 StarBrush = item.IsFavorite
                     ? AccountEdits.BrushFromHex("#F5B301")
                     : AccountEdits.BrushFromHex("#9CA3AF")
