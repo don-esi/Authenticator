@@ -35,6 +35,7 @@
 					HorizontalAlignment="Right"
 					IsDefault="True"
 					Style="{StaticResource TextActionButton}"
+					FontWeight="SemiBold"
 					AutomationProperties.Name="Save"
 					Click="Save_Click" />
 			</Grid>

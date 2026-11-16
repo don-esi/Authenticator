@@ -201,13 +201,12 @@ public partial class AddAccountWindow : Window
         if (_existing is null || _busy)
             return;
 
-        var confirm = MessageBox.Show(
+        if (!AppDialog.Confirm(
             this,
             $"Delete \"{_existing.ServiceName}\"?",
             "Delete account",
-            MessageBoxButton.YesNo,
-            MessageBoxImage.Question);
-        if (confirm != MessageBoxResult.Yes)
+            confirmText: "Delete",
+            kind: AppDialogKind.Warning))
             return;
 
         _busy = true;

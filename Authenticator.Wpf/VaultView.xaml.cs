@@ -43,6 +43,9 @@ public partial class VaultView : UserControl
     private string? _autoFilter;
     private IReadOnlyList<string> _autoMatchTerms = Array.Empty<string>();
     private bool _chipSync;
+    private bool _conflictScanRunning;
+    private bool _skipConflictScanOnReload;
+    private CancellationTokenSource? _conflictScanCts;
     private readonly DispatcherTimer _searchDebounce;
     private readonly DispatcherTimer _toastTimer;
 
@@ -113,10 +116,78 @@ public partial class VaultView : UserControl
             _rowById = rows.ToDictionary(r => r.Id);
             _allRowsView = new ObservableCollection<VaultRow>(rows);
             await ApplyFilterAsync();
+            // Conflict hash compare is expensive — kick a lazy background scan when providers are live.
+            if (!_skipConflictScanOnReload)
+                ScheduleConflictScan(announce: false);
         }
         catch (Exception ex)
         {
-            MessageBox.Show($"Could not load vault: {ex.Message}", "Vault", MessageBoxButton.OK, MessageBoxImage.Warning);
+            AppDialog.Alert(Window.GetWindow(this), $"Could not load vault: {ex.Message}", "Vault", AppDialogKind.Warning);
+        }
+    }
+
+    private void ScheduleConflictScan(string? providerId = null, bool announce = true)
+    {
+        if (ProviderSessionService.Instance.LiveConnected.Count == 0 &&
+            string.IsNullOrWhiteSpace(providerId))
+            return;
+
+        _conflictScanCts?.Cancel();
+        _conflictScanCts = new CancellationTokenSource();
+        var ct = _conflictScanCts.Token;
+        _ = RunConflictScanAsync(providerId, announce, ct);
+    }
+
+    private async Task RunConflictScanAsync(string? providerId, bool announce, CancellationToken ct)
+    {
+        if (_conflictScanRunning)
+            return;
+
+        _conflictScanRunning = true;
+        try
+        {
+            if (announce)
+                await Dispatcher.InvokeAsync(() => ShowStatusToast("Checking for conflicts…"));
+
+            var scanProviderId = providerId;
+            var result = await Task.Run(async () =>
+            {
+                if (!string.IsNullOrWhiteSpace(scanProviderId))
+                    return await ProviderSessionService.Instance.ScanConflictsAsync(scanProviderId, ct);
+                return await ProviderSessionService.Instance.ScanAllConflictsAsync(ct);
+            }, ct);
+
+            ct.ThrowIfCancellationRequested();
+
+            _skipConflictScanOnReload = true;
+            try
+            {
+                await ReloadAsync();
+            }
+            finally
+            {
+                _skipConflictScanOnReload = false;
+            }
+
+            if (announce || result.Conflicts > 0)
+            {
+                await Dispatcher.InvokeAsync(() =>
+                    ShowStatusToast(result.Conflicts > 0
+                        ? $"{result.Conflicts} conflict(s) found"
+                        : "No conflicts"));
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // superseded by a newer scan
+        }
+        catch (Exception ex)
+        {
+            LoggingConfiguration.LogException(ex, "Background conflict scan failed.", nameof(VaultView));
+        }
+        finally
+        {
+            _conflictScanRunning = false;
         }
     }
 
@@ -369,8 +440,14 @@ public partial class VaultView : UserControl
     {
         if (_groupMode == VaultGroupMode.None)
         {
+            // Same id order: mutate existing row instances so bindings refresh (title/user/badge)
+            // without resetting scroll. Replacing ItemsSource alone can leave virtualized chips stale.
             if (SameRowIds(_rows, nextList) && ReferenceEquals(ItemsList.ItemsSource, _rows))
+            {
+                for (var i = 0; i < _rows.Count; i++)
+                    _rows[i].ApplyFrom(nextList[i]);
                 return;
+            }
 
             _rows = new ObservableCollection<VaultRow>(nextList);
             ItemsList.ItemsSource = _rows;
@@ -757,7 +834,7 @@ public partial class VaultView : UserControl
         // Load metadata/notes without decrypting password — Reveal in the editor fetches it.
         var item = await _vault.GetByIdAsync(row.Id, revealSecrets: true, revealPassword: false);
         if (item is null) return;
-        EditItem(item);
+        await EditItemAsync(item);
         e.Handled = true;
     }
 
@@ -766,13 +843,12 @@ public partial class VaultView : UserControl
         if (sender is not FrameworkElement { Tag: VaultRow row })
             return;
         CloseOpenSlide();
-        var confirm = MessageBox.Show(
-            Window.GetWindow(this),
-            $"Delete “{row.SortTitle}”?",
-            "Delete",
-            MessageBoxButton.YesNo,
-            MessageBoxImage.Warning);
-        if (confirm != MessageBoxResult.Yes)
+        if (!AppDialog.Confirm(
+                Window.GetWindow(this),
+                $"Delete “{row.SortTitle}”?",
+                "Delete",
+                confirmText: "Delete",
+                kind: AppDialogKind.Warning))
             return;
         await _vault.DeleteAsync(row.Id);
         await ReloadAsync();
@@ -803,7 +879,7 @@ public partial class VaultView : UserControl
         catch (Exception ex)
         {
             LoggingConfiguration.LogException(ex, $"Failed to update favorite for vault item {row.Id}.", nameof(VaultView));
-            MessageBox.Show(Window.GetWindow(this), ex.Message, "Favorite", MessageBoxButton.OK, MessageBoxImage.Error);
+            AppDialog.Alert(Window.GetWindow(this), ex.Message, "Favorite", AppDialogKind.Error);
         }
     }
 
@@ -870,17 +946,22 @@ public partial class VaultView : UserControl
         }
     }
 
-    private void EditItem(VaultItem item)
+    private async Task EditItemAsync(VaultItem item)
     {
         var win = new VaultItemEditWindow(item) { Owner = Window.GetWindow(this) };
         if (win.ShowDialog() == true)
-            _ = ReloadAsync();
+            await ReloadAsync();
     }
 
     private static MenuItem MakeMenu(string header, Action action)
     {
         var item = new MenuItem { Header = header };
-        item.Click += (_, _) => action();
+        // Defer until the ContextMenu has closed — ShowDialog from a menu Click is a no-op.
+        item.Click += (_, _) =>
+        {
+            var dispatcher = Application.Current?.Dispatcher ?? Dispatcher.CurrentDispatcher;
+            dispatcher.BeginInvoke(DispatcherPriority.ApplicationIdle, action);
+        };
         return item;
     }
 
@@ -900,7 +981,8 @@ public partial class VaultView : UserControl
         if (win.ShowDialog() != true || win.ResultProvider is null)
             return;
 
-        MessageBox.Show(
+        AppDialog.Alert(
+            Window.GetWindow(this),
             $"Imported {win.ImportedCount ?? 0} entries from {win.ResultProvider.DisplayName}.",
             "Import");
         await ReloadAsync();
@@ -915,21 +997,28 @@ public partial class VaultView : UserControl
         var msg = win.ImportedCount is int n
             ? $"Connected to {win.ResultProvider.DisplayName} and synced {n} entries."
             : $"Connected to {win.ResultProvider.DisplayName}.";
-        MessageBox.Show(msg, "Connect");
+        AppDialog.Alert(Window.GetWindow(this), msg, "Connect");
         await ReloadAsync();
+        if (win.ResultProvider is not null)
+            ScheduleConflictScan(win.ResultProvider.ProviderId);
     }
 
     public async Task SyncConnectedProviderAsync(string providerId)
     {
         try
         {
-            var result = await ProviderSessionService.Instance.SyncProviderAsync(providerId);
+            // Fast path: import missing only. Conflict detection runs lazily in the background.
+            var result = await ProviderSessionService.Instance.SyncProviderImportAsync(providerId);
             await ReloadAsync();
-            ReportSyncResult(providerId, result);
+            ShowStatusToast(
+                result.Imported > 0
+                    ? $"Imported {result.Imported} new from {providerId}"
+                    : $"Synced {providerId}");
+            ScheduleConflictScan(providerId);
         }
         catch (Exception ex)
         {
-            MessageBox.Show(ex.Message, "Sync failed", MessageBoxButton.OK, MessageBoxImage.Warning);
+            AppDialog.Alert(Window.GetWindow(this), ex.Message, "Sync failed", AppDialogKind.Warning);
         }
     }
 
@@ -937,41 +1026,24 @@ public partial class VaultView : UserControl
     {
         try
         {
-            var result = await ProviderSessionService.Instance.SyncAllConnectedAsync();
+            var result = await ProviderSessionService.Instance.SyncAllImportAsync();
             await ReloadAsync();
-            ReportSyncResult("connected providers", result);
+            ShowStatusToast(
+                result.Imported > 0
+                    ? $"Imported {result.Imported} new from connected providers"
+                    : "Synced connected providers");
+            ScheduleConflictScan();
         }
         catch (Exception ex)
         {
-            MessageBox.Show(ex.Message, "Sync failed", MessageBoxButton.OK, MessageBoxImage.Warning);
-        }
-    }
-
-    private void ReportSyncResult(string source, VaultSyncResult result)
-    {
-        var summary =
-            $"Imported {result.Imported} new, {result.Unchanged} unchanged, {result.Conflicts} conflict(s) from {source}.";
-        if (result.Conflicts > 0)
-        {
-            MessageBox.Show(
-                Window.GetWindow(this),
-                summary + "\n\nOpen the Conflicts chip (or click a red badge) to resolve in Diff/match.",
-                "Sync",
-                MessageBoxButton.OK,
-                MessageBoxImage.Warning);
-            SelectFilter(VaultFilterMode.Conflicts, reload: false);
-            ApplyFilter();
-        }
-        else
-        {
-            MessageBox.Show(Window.GetWindow(this), summary, "Sync", MessageBoxButton.OK, MessageBoxImage.Information);
+            AppDialog.Alert(Window.GetWindow(this), ex.Message, "Sync failed", AppDialogKind.Warning);
         }
     }
 
     public void DisconnectProvider(string providerId)
     {
         ProviderSessionService.Instance.Disconnect(providerId);
-        MessageBox.Show($"Disconnected {providerId}.", "Disconnect");
+        AppDialog.Alert(Window.GetWindow(this), $"Disconnected {providerId}.", "Disconnect");
     }
 
     public void ShowProvidersMenu(FrameworkElement placementTarget)
@@ -985,10 +1057,7 @@ public partial class VaultView : UserControl
         {
             menu.Items.Add(new Separator());
             menu.Items.Add(MakeMenu($"Review conflicts ({conflictCount})…", () =>
-            {
-                SelectFilter(VaultFilterMode.Conflicts, reload: false);
-                ApplyFilter();
-            }));
+                _ = OpenFirstConflictForProviderAsync(null)));
         }
 
         var saved = ProviderSessionService.Instance.SavedConnections.ToList();
@@ -1000,9 +1069,13 @@ public partial class VaultView : UserControl
             {
                 var providerId = conn.ProviderId;
                 var label = string.IsNullOrWhiteSpace(conn.DisplayName) ? providerId : conn.DisplayName;
+                var providerConflicts = _allRowsView.Count(r =>
+                    r.HasMismatch && r.HasMismatchFor(providerId));
                 var sub = new MenuItem { Header = label };
                 sub.Items.Add(MakeMenu("Sync now", () => _ = SyncConnectedProviderAsync(providerId)));
-                sub.Items.Add(MakeMenu("Review conflicts…", () => _ = OpenFirstConflictForProviderAsync(providerId)));
+                sub.Items.Add(MakeMenu(
+                    providerConflicts > 0 ? $"Review conflicts ({providerConflicts})…" : "Review conflicts…",
+                    () => _ = OpenFirstConflictForProviderAsync(providerId)));
                 sub.Items.Add(MakeMenu("Disconnect", () => DisconnectProvider(providerId)));
                 menu.Items.Add(sub);
             }
@@ -1019,13 +1092,38 @@ public partial class VaultView : UserControl
         _ = OpenDiffAsync(row);
     }
 
-    private async Task OpenFirstConflictForProviderAsync(string providerId)
+    private async Task OpenFirstConflictForProviderAsync(string? providerId)
     {
         SelectFilter(VaultFilterMode.Conflicts, reload: false);
         ApplyFilter();
-        var row = _allRowsView.FirstOrDefault(r => r.HasMismatch);
-        if (row is not null)
-            await OpenDiffAsync(row, preferredProviderId: providerId);
+
+        VaultRow? row = null;
+        if (!string.IsNullOrWhiteSpace(providerId))
+        {
+            row = _allRowsView.FirstOrDefault(r => r.HasMismatch && r.HasMismatchFor(providerId));
+            if (row is null)
+            {
+                AppDialog.Alert(
+                    Window.GetWindow(this),
+                    $"No conflicts for {providerId}. Run Sync now to compare Shared with the connected vault.",
+                    "Conflicts");
+                return;
+            }
+        }
+        else
+        {
+            row = _allRowsView.FirstOrDefault(r => r.HasMismatch);
+            if (row is null)
+            {
+                AppDialog.Alert(
+                    Window.GetWindow(this),
+                    "No conflicts right now. Sync a connected provider to detect mismatches.",
+                    "Conflicts");
+                return;
+            }
+        }
+
+        await OpenDiffAsync(row, preferredProviderId: providerId);
     }
 
     private async Task OpenDiffAsync(VaultRow row, string? preferredProviderId = null)
@@ -1043,28 +1141,15 @@ public partial class VaultView : UserControl
                 ?? item.ExternalLinks.FirstOrDefault();
             if (link is null)
             {
-                MessageBox.Show(Window.GetWindow(this), "This item has no linked provider.", "Diff",
-                    MessageBoxButton.OK, MessageBoxImage.Information);
+                AppDialog.Alert(Window.GetWindow(this), "This item has no linked provider.", "Diff");
                 return;
             }
 
-            ProviderEntry? remote = null;
-            IVaultProvider? provider = null;
-            try
-            {
-                provider = await ProviderSessionService.Instance.EnsureConnectedAsync(link.Provider);
-            }
-            catch
-            {
-                // Diff can still open with Shared-only values.
-            }
-
-            if (provider is not null)
-            {
-                var entries = await provider.ListEntriesAsync();
-                remote = entries.FirstOrDefault(e =>
-                    string.Equals(e.ExternalId, link.ExternalId, StringComparison.OrdinalIgnoreCase));
-            }
+            var remote = await ProviderSessionService.Instance.FindRemoteEntryAsync(
+                link.Provider,
+                link.ExternalId,
+                item.Title,
+                item.Username);
 
             var win = new DiffMatchWindow(item, remote, link.Provider) { Owner = Window.GetWindow(this) };
             if (win.ShowDialog() == true)
@@ -1073,25 +1158,62 @@ public partial class VaultView : UserControl
         catch (Exception ex)
         {
             LoggingConfiguration.LogException(ex, $"Failed to open Diff for {row.Id}.", nameof(VaultView));
-            MessageBox.Show(Window.GetWindow(this), ex.Message, "Diff", MessageBoxButton.OK, MessageBoxImage.Warning);
+            AppDialog.Alert(Window.GetWindow(this), ex.Message, "Diff", AppDialogKind.Warning);
         }
     }
 
     public sealed class VaultRow : INotifyPropertyChanged
     {
         private bool _isFavorite;
+        private VaultItemType _itemType;
+        private string _subtitle = "";
+        private string _identity = "";
+        private string _username = "";
+        private string _sortTitle = "";
+        private string _host = "";
+        private string _initial = "?";
+        private Brush _iconBrush = Brushes.Gray;
+        private bool _hasMismatch;
+        private string _badgeGlyph = "\uE77B";
+        private Brush _badgeBrush = AccountEdits.BrushFromHex("#1A73E8");
 
         public Guid Id { get; set; }
-        public VaultItemType ItemType { get; set; }
-        public string Subtitle { get; set; } = "";
-        public string Identity { get; set; } = "";
-        public string Username { get; set; } = "";
-        public string SortTitle { get; set; } = "";
-        public string Host { get; set; } = "";
+        public VaultItemType ItemType
+        {
+            get => _itemType;
+            set { if (_itemType == value) return; _itemType = value; Notify(nameof(ItemType)); }
+        }
+        public string Subtitle
+        {
+            get => _subtitle;
+            set { if (_subtitle == value) return; _subtitle = value; Notify(nameof(Subtitle)); }
+        }
+        public string Identity
+        {
+            get => _identity;
+            set { if (_identity == value) return; _identity = value; Notify(nameof(Identity)); }
+        }
+        public string Username
+        {
+            get => _username;
+            set { if (_username == value) return; _username = value; Notify(nameof(Username)); }
+        }
+        public string SortTitle
+        {
+            get => _sortTitle;
+            set { if (_sortTitle == value) return; _sortTitle = value; Notify(nameof(SortTitle)); }
+        }
+        public string Host
+        {
+            get => _host;
+            set { if (_host == value) return; _host = value; Notify(nameof(Host)); }
+        }
         public string GroupKey { get; set; } = "";
         /// <summary>Lowercased title/username/host/url blob for partial relevance matching.</summary>
         public string MatchBlob { get; set; } = "";
         public string[] MatchTokens { get; set; } = Array.Empty<string>();
+        /// <summary>Provider ids with <c>ExternalLink.IsMismatch</c> for this row.</summary>
+        public string[] MismatchProviders { get; set; } = Array.Empty<string>();
         public bool IsFavorite
         {
             get => _isFavorite;
@@ -1100,16 +1222,47 @@ public partial class VaultView : UserControl
                 if (_isFavorite == value)
                     return;
                 _isFavorite = value;
-                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsFavorite)));
-                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Star)));
-                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(StarBrush)));
+                Notify(nameof(IsFavorite));
+                Notify(nameof(Star));
+                Notify(nameof(StarBrush));
             }
         }
-        public string Initial { get; set; } = "?";
-        public Brush IconBrush { get; set; } = Brushes.Gray;
-        public bool HasMismatch { get; set; }
-        public string BadgeGlyph { get; set; } = "\uE77B";
-        public Brush BadgeBrush { get; set; } = AccountEdits.BrushFromHex("#1A73E8");
+
+        public bool HasMismatchFor(string providerId) =>
+            MismatchProviders.Any(p => string.Equals(p, providerId, StringComparison.OrdinalIgnoreCase));
+        public string Initial
+        {
+            get => _initial;
+            set { if (_initial == value) return; _initial = value; Notify(nameof(Initial)); }
+        }
+        public Brush IconBrush
+        {
+            get => _iconBrush;
+            set { if (ReferenceEquals(_iconBrush, value)) return; _iconBrush = value; Notify(nameof(IconBrush)); }
+        }
+        public bool HasMismatch
+        {
+            get => _hasMismatch;
+            set
+            {
+                if (_hasMismatch == value)
+                    return;
+                _hasMismatch = value;
+                Notify(nameof(HasMismatch));
+                Notify(nameof(BadgeCursor));
+                Notify(nameof(BadgeToolTip));
+            }
+        }
+        public string BadgeGlyph
+        {
+            get => _badgeGlyph;
+            set { if (_badgeGlyph == value) return; _badgeGlyph = value; Notify(nameof(BadgeGlyph)); }
+        }
+        public Brush BadgeBrush
+        {
+            get => _badgeBrush;
+            set { if (ReferenceEquals(_badgeBrush, value)) return; _badgeBrush = value; Notify(nameof(BadgeBrush)); }
+        }
         public Cursor BadgeCursor => HasMismatch ? Cursors.Hand : Cursors.Arrow;
         public string? BadgeToolTip => HasMismatch ? "Conflict — open Diff/match" : null;
         public string Star => IsFavorite ? "★" : "☆";
@@ -1118,6 +1271,30 @@ public partial class VaultView : UserControl
             : AccountEdits.BrushFromHex("#9CA3AF");
 
         public event PropertyChangedEventHandler? PropertyChanged;
+
+        public void ApplyFrom(VaultRow other)
+        {
+            Id = other.Id;
+            ItemType = other.ItemType;
+            Subtitle = other.Subtitle;
+            Identity = other.Identity;
+            Username = other.Username;
+            SortTitle = other.SortTitle;
+            Host = other.Host;
+            GroupKey = other.GroupKey;
+            MatchBlob = other.MatchBlob;
+            MatchTokens = other.MatchTokens;
+            MismatchProviders = other.MismatchProviders;
+            IsFavorite = other.IsFavorite;
+            Initial = other.Initial;
+            IconBrush = other.IconBrush;
+            HasMismatch = other.HasMismatch;
+            BadgeGlyph = other.BadgeGlyph;
+            BadgeBrush = other.BadgeBrush;
+        }
+
+        private void Notify(string name) =>
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
 
         public static VaultRow From(VaultItem item)
         {
@@ -1135,6 +1312,12 @@ public partial class VaultView : UserControl
                 host.Contains('.') ? host.Split('.')[0] : "").ToLowerInvariant();
             var tokens = ForegroundWindowMonitor.StrongMatchTerms(
                 new[] { item.Title, item.Username ?? "", item.Url ?? "", host });
+            var mismatchProviders = item.ExternalLinks?
+                .Where(l => l.IsMismatch && !string.IsNullOrWhiteSpace(l.Provider))
+                .Select(l => l.Provider)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToArray() ?? Array.Empty<string>();
+            var hasMismatch = item.HasMismatch || mismatchProviders.Length > 0;
             return new VaultRow
             {
                 Id = item.Id,
@@ -1146,12 +1329,13 @@ public partial class VaultView : UserControl
                 Host = host,
                 MatchBlob = blob,
                 MatchTokens = tokens.ToArray(),
+                MismatchProviders = mismatchProviders,
                 IsFavorite = item.IsFavorite,
-                HasMismatch = item.HasMismatch,
+                HasMismatch = hasMismatch,
                 Initial = string.IsNullOrWhiteSpace(seed) ? "?" : seed.Trim()[..1].ToUpperInvariant(),
                 IconBrush = AccountEdits.InitialBrush(seed),
-                BadgeGlyph = item.HasMismatch ? "\uE7BA" : GlyphFor(item.ItemType), // Warning / type
-                BadgeBrush = item.HasMismatch
+                BadgeGlyph = hasMismatch ? "\uE7BA" : GlyphFor(item.ItemType), // Warning / type
+                BadgeBrush = hasMismatch
                     ? AccountEdits.BrushFromHex("#B00020")
                     : AccountEdits.BrushFromHex("#1A73E8")
             };

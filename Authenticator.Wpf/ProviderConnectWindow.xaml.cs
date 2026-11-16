@@ -160,8 +160,11 @@ public partial class ProviderConnectWindow : Window
         }
         catch (Exception ex)
         {
-            MessageBox.Show(this, ex.Message, _mode == ProviderDialogMode.Connect ? "Connect failed" : "Import failed",
-                MessageBoxButton.OK, MessageBoxImage.Warning);
+            AppDialog.Alert(
+                this,
+                ex.Message,
+                _mode == ProviderDialogMode.Connect ? "Connect failed" : "Import failed",
+                AppDialogKind.Warning);
         }
         finally
         {

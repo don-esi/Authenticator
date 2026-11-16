@@ -18,6 +18,8 @@ public sealed class VaultPushResult
     public int Updated { get; set; }
     public int Skipped { get; set; }
     public int Failed { get; set; }
+    public int LinkCount { get; set; }
+    public bool Attempted => LinkCount > 0;
     public List<string> Messages { get; } = new();
 }
 
@@ -54,41 +56,74 @@ public sealed class VaultImportService
     }
 
     /// <summary>
-    /// Ongoing sync: import new links; leave matching items alone; mark hash conflicts without overwriting Shared.
+    /// Full reconcile (import missing + conflict scan). Prefer splitting for UI: import first, scan in background.
     /// </summary>
     public async Task<VaultSyncResult> ReconcileAsync(IVaultProvider provider, CancellationToken ct = default)
+    {
+        var imported = await ImportMissingAsync(provider, ct);
+        var scanned = await ScanConflictsAsync(provider, ct);
+        return new VaultSyncResult
+        {
+            Imported = imported,
+            Unchanged = scanned.Unchanged,
+            Conflicts = scanned.Conflicts
+        };
+    }
+
+    /// <summary>Fast path: add provider entries that are not linked in Shared yet.</summary>
+    public async Task<int> ImportMissingAsync(IVaultProvider provider, CancellationToken ct = default)
     {
         if (!provider.IsConnected)
             throw new InvalidOperationException($"{provider.DisplayName} is not connected.");
 
         var entries = await provider.ListEntriesAsync(ct);
+        ProviderSessionService.Instance.CacheRemoteEntries(provider.ProviderId, entries);
+
+        var imported = 0;
+        foreach (var entry in entries)
+        {
+            ct.ThrowIfCancellationRequested();
+            var existingId = await FindLinkedItemIdAsync(provider.ProviderId, entry.ExternalId, ct);
+            if (existingId is not null)
+                continue;
+
+            var item = new VaultItem { Id = Guid.NewGuid() };
+            ApplyEntry(item, entry, provider.Capabilities.SupportsFavorites);
+            item.IsDeleted = false;
+            await _items.SaveAsync(item, ct);
+            await UpsertLinkAsync(item.Id, provider.ProviderId, entry.ExternalId, VaultItemService.ContentHash(item), mismatch: false, ct);
+            imported++;
+        }
+
+        LoggingConfiguration.LogInfo(
+            $"Imported {imported} missing entries from {provider.ProviderId}.",
+            nameof(VaultImportService));
+        return imported;
+    }
+
+    /// <summary>
+    /// Lazy/background: hash-compare linked Shared items vs provider entries; flag mismatches without overwriting Shared.
+    /// Caches remote snapshots so Diff can show the provider side.
+    /// </summary>
+    public async Task<VaultSyncResult> ScanConflictsAsync(IVaultProvider provider, CancellationToken ct = default)
+    {
+        if (!provider.IsConnected)
+            throw new InvalidOperationException($"{provider.DisplayName} is not connected.");
+
+        var entries = await provider.ListEntriesAsync(ct);
+        ProviderSessionService.Instance.CacheRemoteEntries(provider.ProviderId, entries);
+
         var result = new VaultSyncResult();
         foreach (var entry in entries)
         {
             ct.ThrowIfCancellationRequested();
             var existingId = await FindLinkedItemIdAsync(provider.ProviderId, entry.ExternalId, ct);
             if (existingId is null)
-            {
-                var item = new VaultItem { Id = Guid.NewGuid() };
-                ApplyEntry(item, entry, provider.Capabilities.SupportsFavorites);
-                item.IsDeleted = false;
-                await _items.SaveAsync(item, ct);
-                await UpsertLinkAsync(item.Id, provider.ProviderId, entry.ExternalId, VaultItemService.ContentHash(item), mismatch: false, ct);
-                result.Imported++;
                 continue;
-            }
 
             var local = await _items.GetByIdAsync(existingId.Value, ct);
             if (local is null)
-            {
-                var item = new VaultItem { Id = existingId.Value };
-                ApplyEntry(item, entry, provider.Capabilities.SupportsFavorites);
-                item.IsDeleted = false;
-                await _items.SaveAsync(item, ct);
-                await UpsertLinkAsync(item.Id, provider.ProviderId, entry.ExternalId, VaultItemService.ContentHash(item), mismatch: false, ct);
-                result.Imported++;
                 continue;
-            }
 
             var localHash = VaultItemService.ContentHash(local);
             var remoteHash = ContentHash(entry);
@@ -99,14 +134,15 @@ public sealed class VaultImportService
             }
             else
             {
-                // Keep Shared values; flag for Diff/match resolution.
+                // Keep Shared values; flag for Diff/match resolution and keep remote snapshot for Diff UI.
+                ProviderSessionService.Instance.CacheRemoteEntry(provider.ProviderId, entry);
                 await UpsertLinkAsync(local.Id, provider.ProviderId, entry.ExternalId, remoteHash, mismatch: true, ct);
                 result.Conflicts++;
             }
         }
 
         LoggingConfiguration.LogInfo(
-            $"Reconciled {provider.ProviderId}: imported={result.Imported}, unchanged={result.Unchanged}, conflicts={result.Conflicts}.",
+            $"Conflict scan {provider.ProviderId}: unchanged={result.Unchanged}, conflicts={result.Conflicts}.",
             nameof(VaultImportService));
         return result;
     }
@@ -176,6 +212,7 @@ public sealed class VaultImportService
         ArgumentNullException.ThrowIfNull(item);
         var result = new VaultPushResult();
         var links = await GetLinksForItemAsync(item.Id, ct);
+        result.LinkCount = links.Count;
         if (links.Count == 0)
             return result;
 
@@ -183,10 +220,18 @@ public sealed class VaultImportService
         foreach (var link in links)
         {
             ct.ThrowIfCancellationRequested();
-            if (string.IsNullOrWhiteSpace(link.ExternalId))
+            var originId = link.ExternalId?.Trim() ?? "";
+            if (string.IsNullOrWhiteSpace(originId))
             {
                 result.Skipped++;
                 result.Messages.Add($"{link.Provider}: missing origin store id.");
+                continue;
+            }
+
+            // Skip non-provider bookkeeping rows if any were stored as "Shared".
+            if (string.Equals(link.Provider, "Shared", StringComparison.OrdinalIgnoreCase))
+            {
+                result.Skipped++;
                 continue;
             }
 
@@ -199,7 +244,7 @@ public sealed class VaultImportService
             {
                 result.Skipped++;
                 result.Messages.Add($"{link.Provider}: not connected ({ex.Message}).");
-                await UpsertLinkAsync(item.Id, link.Provider, link.ExternalId, hash, mismatch: true, ct);
+                await UpsertLinkAsync(item.Id, link.Provider, originId, hash, mismatch: true, ct);
                 continue;
             }
 
@@ -207,22 +252,25 @@ public sealed class VaultImportService
             {
                 result.Skipped++;
                 result.Messages.Add($"{provider.DisplayName}: write-back not supported.");
-                await UpsertLinkAsync(item.Id, link.Provider, link.ExternalId, hash, mismatch: true, ct);
+                await UpsertLinkAsync(item.Id, link.Provider, originId, hash, mismatch: true, ct);
                 continue;
             }
 
             try
             {
-                await provider.UpdateEntryAsync(ToProviderEntry(item, link.ExternalId), ct);
-                await UpsertLinkAsync(item.Id, link.Provider, link.ExternalId, hash, mismatch: false, ct);
+                await provider.UpdateEntryAsync(ToProviderEntry(item, originId), ct);
+                await UpsertLinkAsync(item.Id, link.Provider, originId, hash, mismatch: false, ct);
                 result.Updated++;
+                LoggingConfiguration.LogInfo(
+                    $"Pushed Shared→{link.Provider} for {item.Id} (origin id {originId}).",
+                    nameof(VaultImportService));
             }
             catch (Exception ex)
             {
                 LoggingConfiguration.LogException(ex, $"Push to {link.Provider} failed for {item.Id}.", nameof(VaultImportService));
                 result.Failed++;
                 result.Messages.Add($"{provider.DisplayName}: {ex.Message}");
-                await UpsertLinkAsync(item.Id, link.Provider, link.ExternalId, hash, mismatch: true, ct);
+                await UpsertLinkAsync(item.Id, link.Provider, originId, hash, mismatch: true, ct);
             }
         }
 
@@ -233,7 +281,7 @@ public sealed class VaultImportService
         new()
         {
             ExternalId = externalId,
-            Title = item.Title,
+            Title = item.Title ?? "",
             Username = item.Username,
             Password = item.Password,
             Url = item.Url,
@@ -275,18 +323,32 @@ public sealed class VaultImportService
 
     private static async Task<Guid?> FindLinkedItemIdAsync(string provider, string externalId, CancellationToken ct)
     {
+        var norm = ProviderSessionService.NormalizeExternalId(externalId);
+        if (string.IsNullOrEmpty(norm))
+            return null;
+
+        List<ExternalLink> links;
         if (ConnectionConfig.IsOfflineMode)
         {
             await using var offline = new OfflineVaultDbContext();
-            var link = await offline.ExternalLinks.AsNoTracking()
-                .FirstOrDefaultAsync(l => l.Provider == provider && l.ExternalId == externalId, ct);
-            return link?.ItemId;
+            links = await offline.ExternalLinks.AsNoTracking()
+                .Where(l => l.Provider == provider)
+                .ToListAsync(ct);
+        }
+        else
+        {
+            await using var db = new AuthenticatorDbContext();
+            links = await db.ExternalLinks.AsNoTracking()
+                .Where(l => l.Provider == provider)
+                .ToListAsync(ct);
         }
 
-        await using var db = new AuthenticatorDbContext();
-        var shared = await db.ExternalLinks.AsNoTracking()
-            .FirstOrDefaultAsync(l => l.Provider == provider && l.ExternalId == externalId, ct);
-        return shared?.ItemId;
+        return links.FirstOrDefault(l =>
+                string.Equals(
+                    ProviderSessionService.NormalizeExternalId(l.ExternalId),
+                    norm,
+                    StringComparison.Ordinal))
+            ?.ItemId;
     }
 
     private static async Task UpsertLinkAsync(

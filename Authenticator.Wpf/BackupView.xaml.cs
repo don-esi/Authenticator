@@ -105,12 +105,10 @@ public partial class BackupView : UserControl
 
         if (_codesMasked)
         {
-            MessageBox.Show(
+            AppDialog.Alert(
                 Window.GetWindow(this),
                 "Move the mouse or press a key to show backup codes again.",
-                "Codes hidden",
-                MessageBoxButton.OK,
-                MessageBoxImage.Information);
+                "Codes hidden");
             return;
         }
 
@@ -137,7 +135,7 @@ public partial class BackupView : UserControl
         catch (Exception ex)
         {
             LoggingConfiguration.LogException(ex, $"Failed to mark backup code id {row.Id} used.", nameof(BackupView));
-            MessageBox.Show(Window.GetWindow(this), ex.Message, "Backup codes", MessageBoxButton.OK, MessageBoxImage.Error);
+            AppDialog.Alert(Window.GetWindow(this), ex.Message, "Backup codes", AppDialogKind.Error);
         }
     }
 }

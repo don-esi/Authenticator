@@ -63,12 +63,7 @@
 			</syncfusion:SfDataGrid>
 		</Border>
 
-		<Border Grid.Row="2"
-			Background="{DynamicResource NavBarBackgroundBrush}"
-			BorderBrush="{DynamicResource BorderBrushColor}"
-			BorderThickness="0,1,0,0"
-			Padding="16,12"
-			Margin="0,12,0,0">
+		<Border Grid.Row="2" Style="{StaticResource DialogFooter}">
 			<StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
 				<Button x:Name="SyncSharedButton"
 					Content="Sync → Shared"

@@ -676,7 +676,7 @@ public partial class CodesView : UserControl
         catch (Exception ex)
         {
             LoggingConfiguration.LogException(ex, $"Failed to update favorite for account id {row.Id}.", nameof(CodesView));
-            MessageBox.Show(Window.GetWindow(this), ex.Message, "Favorite", MessageBoxButton.OK, MessageBoxImage.Error);
+            AppDialog.Alert(Window.GetWindow(this), ex.Message, "Favorite", AppDialogKind.Error);
         }
     }
 
@@ -704,13 +704,12 @@ public partial class CodesView : UserControl
             return;
 
         CloseOpenSlide();
-        var confirm = MessageBox.Show(
-            Window.GetWindow(this),
-            $"Delete folder \"{folder.Name}\"? Accounts in it return to the main list.",
-            "Delete folder",
-            MessageBoxButton.YesNo,
-            MessageBoxImage.Question);
-        if (confirm != MessageBoxResult.Yes)
+        if (!AppDialog.Confirm(
+                Window.GetWindow(this),
+                $"Delete folder \"{folder.Name}\"? Accounts in it return to the main list.",
+                "Delete folder",
+                confirmText: "Delete",
+                kind: AppDialogKind.Warning))
             return;
 
         try
@@ -724,7 +723,7 @@ public partial class CodesView : UserControl
         catch (Exception ex)
         {
             LoggingConfiguration.LogException(ex, $"Failed to delete folder id {folder.Id}.", nameof(CodesView));
-            MessageBox.Show(Window.GetWindow(this), ex.Message, "Delete folder", MessageBoxButton.OK, MessageBoxImage.Error);
+            AppDialog.Alert(Window.GetWindow(this), ex.Message, "Delete folder", AppDialogKind.Error);
         }
     }
 
@@ -761,13 +760,12 @@ public partial class CodesView : UserControl
             return;
 
         CloseOpenSlide();
-        var confirm = MessageBox.Show(
-            Window.GetWindow(this),
-            $"Delete \"{row.ServiceName}\"?",
-            "Delete account",
-            MessageBoxButton.YesNo,
-            MessageBoxImage.Question);
-        if (confirm != MessageBoxResult.Yes)
+        if (!AppDialog.Confirm(
+                Window.GetWindow(this),
+                $"Delete \"{row.ServiceName}\"?",
+                "Delete account",
+                confirmText: "Delete",
+                kind: AppDialogKind.Warning))
             return;
 
         try
@@ -779,7 +777,7 @@ public partial class CodesView : UserControl
         catch (Exception ex)
         {
             LoggingConfiguration.LogException(ex, $"Failed to delete account id {row.Id}.", nameof(CodesView));
-            MessageBox.Show(Window.GetWindow(this), ex.Message, "Delete account", MessageBoxButton.OK, MessageBoxImage.Error);
+            AppDialog.Alert(Window.GetWindow(this), ex.Message, "Delete account", AppDialogKind.Error);
         }
     }
 

@@ -215,14 +215,13 @@ public partial class MainWindow : Window
             {
                 LoggingConfiguration.LogException(offlineEx, "Offline fallback failed.", nameof(MainWindow));
                 RevealMainWindow();
-                MessageBox.Show(
+                AppDialog.Alert(
                     this,
                     $"Could not connect to SQL Server ({ConnectionConfig.Server}, database {ConnectionConfig.Database}).\n\n" +
                     "Use Settings → Discover LAN, or set Server/Database in:\n" +
                     $"{ConnectionConfig.ConfigPath}\n\n{ex.Message}",
                     "Authenticator — database unavailable",
-                    MessageBoxButton.OK,
-                    MessageBoxImage.Error);
+                    AppDialogKind.Error);
             }
         }
 
@@ -292,12 +291,10 @@ public partial class MainWindow : Window
 
         if (!completed || !_hasUnlockMethod)
         {
-            MessageBox.Show(
+            AppDialog.Alert(
                 this,
                 "Authenticator needs a PIN or Windows Hello before you can use codes. Opening Settings.",
-                "Setup required",
-                MessageBoxButton.OK,
-                MessageBoxImage.Information);
+                "Setup required");
             PageHost.Visibility = Visibility.Visible;
             ShowPage(SettingsPage);
             await SettingsPage.ReloadAsync();

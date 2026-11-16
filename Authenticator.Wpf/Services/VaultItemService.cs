@@ -145,7 +145,12 @@ public sealed class VaultItemService
         item.ModifiedAt = DateTime.UtcNow;
 
         if (ConnectionConfig.IsOfflineMode)
-            return await _offline.SaveAsync(item, queueChange: true, ct);
+        {
+            Seal(item);
+            await _offline.SaveAsync(item, queueChange: true, ct);
+            Reveal(item, includePassword: true);
+            return item;
+        }
 
         await using var db = new AuthenticatorDbContext();
         var existing = await db.VaultItems
@@ -156,6 +161,8 @@ public sealed class VaultItemService
         if (existing is null)
         {
             if (item.CreatedAt == default) item.CreatedAt = DateTime.UtcNow;
+            // Don't cascade-insert navigation collections that belong to other tables.
+            item.ExternalLinks = new List<ExternalLink>();
             db.VaultItems.Add(item);
         }
         else

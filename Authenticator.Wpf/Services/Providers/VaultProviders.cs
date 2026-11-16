@@ -1,6 +1,10 @@
 using System.IO;
 using Authenticator.Data.Models;
 using Authenticator.Logging;
+using KeePassLib;
+using KeePassLib.Keys;
+using KeePassLib.Serialization;
+using KeePassLib.Security;
 using OneOf;
 using PasswordManager.Common;
 using PasswordManager.Duo;
@@ -19,7 +23,7 @@ internal abstract class MemoryVaultProvider : IVaultProvider
 
     public abstract Task ConnectAsync(ProviderConnectRequest request, CancellationToken ct = default);
 
-    public void Disconnect()
+    public virtual void Disconnect()
     {
         IsConnected = false;
         _entries = new();
@@ -28,7 +32,7 @@ internal abstract class MemoryVaultProvider : IVaultProvider
     public Task<IReadOnlyList<ProviderEntry>> ListEntriesAsync(CancellationToken ct = default) =>
         Task.FromResult<IReadOnlyList<ProviderEntry>>(IsConnected ? _entries : Array.Empty<ProviderEntry>());
 
-    public Task UpdateEntryAsync(ProviderEntry entry, CancellationToken ct = default)
+    public virtual Task UpdateEntryAsync(ProviderEntry entry, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(entry);
         if (!IsConnected)
@@ -36,14 +40,35 @@ internal abstract class MemoryVaultProvider : IVaultProvider
         if (string.IsNullOrWhiteSpace(entry.ExternalId))
             throw new ArgumentException("Origin store id (ExternalId) is required.", nameof(entry));
 
+        UpdateMemoryEntry(entry);
+        return Task.CompletedTask;
+    }
+
+    protected void UpdateMemoryEntry(ProviderEntry entry)
+    {
+        var originId = entry.ExternalId.Trim();
         var index = _entries.FindIndex(e =>
-            string.Equals(e.ExternalId, entry.ExternalId, StringComparison.Ordinal));
+            string.Equals(e.ExternalId, originId, StringComparison.OrdinalIgnoreCase));
         if (index < 0)
             throw new InvalidOperationException(
-                $"No {DisplayName} entry with origin id '{entry.ExternalId}'.");
+                $"No {DisplayName} entry with origin id '{originId}'.");
 
-        _entries[index] = entry;
-        return Task.CompletedTask;
+        // Merge onto the live session entry so Path/Fields/etc. survive Shared edits.
+        var previous = _entries[index];
+        _entries[index] = new ProviderEntry
+        {
+            ExternalId = previous.ExternalId,
+            Title = entry.Title,
+            Username = entry.Username,
+            Password = entry.Password ?? previous.Password,
+            Url = entry.Url,
+            Notes = entry.Notes,
+            Totp = entry.Totp ?? previous.Totp,
+            Path = string.IsNullOrWhiteSpace(entry.Path) ? previous.Path : entry.Path,
+            IsFavorite = entry.IsFavorite,
+            ItemType = entry.ItemType == default ? previous.ItemType : entry.ItemType,
+            Fields = entry.Fields.Count > 0 ? entry.Fields : previous.Fields
+        };
     }
 
     protected void SetEntries(IEnumerable<ProviderEntry> entries)
@@ -79,6 +104,9 @@ internal abstract class MemoryVaultProvider : IVaultProvider
 
 internal sealed class KeePassVaultProvider : MemoryVaultProvider
 {
+    private readonly object _gate = new();
+    private PwDatabase? _db;
+
     public override string ProviderId => "KeePass";
     public override string DisplayName => "KeePass";
     public override ProviderCapabilities Capabilities { get; } = new()
@@ -86,7 +114,6 @@ internal sealed class KeePassVaultProvider : MemoryVaultProvider
         RequiresFilePath = true,
         SupportsSecureNotes = true,
         SupportsFavorites = true,
-        // Live session write-back by origin id (kdbx on-disk save not in PasswordManager.KeyPass yet).
         SupportsWriteBack = true
     };
 
@@ -94,15 +121,139 @@ internal sealed class KeePassVaultProvider : MemoryVaultProvider
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(request.FilePath);
         ArgumentException.ThrowIfNullOrWhiteSpace(request.Password);
-        var vault = PasswordManager.KeyPass.Vault.Open(request.FilePath, request.Password, request.KeyFilePath);
-        var entries = vault.Accounts.Select(a =>
+
+        lock (_gate)
         {
-            var fav = a.Fields.TryGetValue("Favorite", out var f) &&
-                      (f is "1" or "true" or "True");
-            return MapLogin(a.Id, a.Name, a.Username, a.Password, a.Url, a.Note, path: a.Path, favorite: fav);
-        });
-        SetEntries(entries);
+            CloseDatabase();
+
+            var key = new CompositeKey();
+            key.AddUserKey(new KcpPassword(request.Password));
+            if (!string.IsNullOrWhiteSpace(request.KeyFilePath))
+                key.AddUserKey(new KcpKeyFile(request.KeyFilePath));
+
+            var db = new PwDatabase();
+            db.Open(IOConnectionInfo.FromPath(request.FilePath), key, null);
+            _db = db;
+            SetEntries(EnumerateEntries(db));
+            LoggingConfiguration.LogInfo(
+                $"KeePass opened '{request.FilePath}' with {_db.RootGroup.GetEntriesCount(true)} entries (write-back enabled).",
+                nameof(KeePassVaultProvider));
+        }
+
         return Task.CompletedTask;
+    }
+
+    public override void Disconnect()
+    {
+        lock (_gate)
+            CloseDatabase();
+        base.Disconnect();
+    }
+
+    public override Task UpdateEntryAsync(ProviderEntry entry, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(entry);
+        if (string.IsNullOrWhiteSpace(entry.ExternalId))
+            throw new ArgumentException("Origin store id (ExternalId) is required.", nameof(entry));
+
+        lock (_gate)
+        {
+            if (_db is null || !IsConnected)
+                throw new InvalidOperationException("KeePass is not connected.");
+
+            var uuid = ParseUuid(entry.ExternalId);
+            var pe = _db.RootGroup.FindEntry(uuid, true)
+                     ?? throw new InvalidOperationException(
+                         $"No KeePass entry with origin id '{entry.ExternalId.Trim()}'.");
+
+            SetField(pe, PwDefs.TitleField, entry.Title ?? "", protect: false);
+            SetField(pe, PwDefs.UserNameField, entry.Username ?? "", protect: false);
+            if (entry.Password is not null)
+                SetField(pe, PwDefs.PasswordField, entry.Password, protect: true);
+            SetField(pe, PwDefs.UrlField, entry.Url ?? "", protect: false);
+            SetField(pe, PwDefs.NotesField, entry.Notes ?? "", protect: false);
+            SetField(pe, "Favorite", entry.IsFavorite ? "1" : "0", protect: false);
+            pe.Touch(true, false);
+
+            try
+            {
+                _db.Save(null);
+            }
+            catch (Exception ex)
+            {
+                throw new InvalidOperationException(
+                    "Could not save KeePass database. Close the file in KeePass if it is open, then try again.",
+                    ex);
+            }
+
+            LoggingConfiguration.LogInfo(
+                $"KeePass wrote origin id {entry.ExternalId.Trim()} to disk.",
+                nameof(KeePassVaultProvider));
+        }
+
+        UpdateMemoryEntry(entry);
+        return Task.CompletedTask;
+    }
+
+    private void CloseDatabase()
+    {
+        if (_db is null)
+            return;
+        try
+        {
+            _db.Close();
+        }
+        catch (Exception ex)
+        {
+            LoggingConfiguration.LogException(ex, "KeePass Close failed.", nameof(KeePassVaultProvider));
+        }
+        finally
+        {
+            _db = null;
+        }
+    }
+
+    private static IEnumerable<ProviderEntry> EnumerateEntries(PwDatabase db)
+    {
+        foreach (var pe in db.RootGroup.GetEntries(true))
+        {
+            var fav = pe.Strings.ReadSafe("Favorite");
+            var favorite = fav is "1" or "true" or "True";
+            yield return MapLogin(
+                pe.Uuid.ToHexString().ToLowerInvariant(),
+                pe.Strings.ReadSafe(PwDefs.TitleField),
+                pe.Strings.ReadSafe(PwDefs.UserNameField),
+                pe.Strings.ReadSafe(PwDefs.PasswordField),
+                pe.Strings.ReadSafe(PwDefs.UrlField),
+                pe.Strings.ReadSafe(PwDefs.NotesField),
+                path: BuildPath(pe),
+                favorite: favorite);
+        }
+    }
+
+    private static string BuildPath(PwEntry entry)
+    {
+        var parts = new Stack<string>();
+        var group = entry.ParentGroup;
+        while (group is not null)
+        {
+            parts.Push(group.Name);
+            group = group.ParentGroup;
+        }
+
+        return string.Join("/", parts);
+    }
+
+    private static void SetField(PwEntry entry, string key, string value, bool protect) =>
+        entry.Strings.Set(key, new ProtectedString(protect, value ?? ""));
+
+    private static PwUuid ParseUuid(string hex)
+    {
+        var cleaned = hex.Trim().Replace("-", "", StringComparison.Ordinal);
+        if (cleaned.Length != 32 || !cleaned.All(Uri.IsHexDigit))
+            throw new ArgumentException($"Invalid KeePass origin id '{hex}'.", nameof(hex));
+
+        return new PwUuid(Convert.FromHexString(cleaned));
     }
 }
 

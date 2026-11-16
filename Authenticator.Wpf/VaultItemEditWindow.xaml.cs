@@ -167,28 +167,32 @@ public partial class VaultItemEditWindow : Window
 
         if (string.IsNullOrWhiteSpace(_item.Title))
         {
-            MessageBox.Show(this, "Title is required.", "Vault");
+            AppDialog.Alert(this, "Title is required.", "Vault", AppDialogKind.Warning);
             return;
         }
 
         await _vault.SaveAsync(_item);
 
         // Push Shared edits to every linked origin store (ExternalLink.ExternalId).
+        // Re-load with full secret reveal so write-back never sends sealed ciphertext.
         if (!_isNew)
         {
-            var push = await new VaultImportService().PushToLinkedProvidersAsync(_item);
-            if (push.Failed > 0 || push.Skipped > 0)
+            var forPush = await _vault.GetByIdAsync(_item.Id) ?? _item;
+            var push = await new VaultImportService().PushToLinkedProvidersAsync(forPush);
+            if (push.Attempted)
             {
                 var detail = push.Messages.Count > 0
                     ? "\n\n" + string.Join("\n", push.Messages.Take(6))
                     : "";
-                MessageBox.Show(
+                if (push.Failed > 0 || push.Skipped > 0 || push.Updated == 0)
+                {
+                AppDialog.Alert(
                     this,
                     $"Saved to Shared. Updated {push.Updated} connected source(s); " +
                     $"{push.Skipped} skipped, {push.Failed} failed.{detail}",
                     "Vault",
-                    MessageBoxButton.OK,
-                    push.Failed > 0 ? MessageBoxImage.Warning : MessageBoxImage.Information);
+                    push.Failed > 0 ? AppDialogKind.Warning : AppDialogKind.Info);
+                }
             }
         }
 

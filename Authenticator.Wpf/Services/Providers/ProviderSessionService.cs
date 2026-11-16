@@ -20,9 +20,12 @@ public sealed class ProviderSessionService
 
     private readonly ProviderConnectionStore _store = new();
     private readonly Dictionary<string, IVaultProvider> _live = new(StringComparer.OrdinalIgnoreCase);
+    /// <summary>providerId + normalized origin id → last-seen provider entry (for Diff UI).</summary>
+    private readonly Dictionary<string, ProviderEntry> _remoteCache = new(StringComparer.OrdinalIgnoreCase);
     private readonly object _gate = new();
 
     public event EventHandler? ConnectionsChanged;
+    public event EventHandler<VaultSyncResult>? ConflictScanCompleted;
 
     public IReadOnlyList<ProviderConnectionRecord> SavedConnections => _store.LoadAll();
 
@@ -107,6 +110,7 @@ public sealed class ProviderSessionService
         {
             if (_live.Remove(providerId, out var live))
                 live.Disconnect();
+            ClearRemoteCache_NoLock(providerId);
         }
 
         _store.Remove(providerId);
@@ -122,8 +126,124 @@ public sealed class ProviderSessionService
             foreach (var provider in _live.Values)
                 provider.Disconnect();
             _live.Clear();
+            _remoteCache.Clear();
         }
     }
+
+    public static string NormalizeExternalId(string? externalId)
+    {
+        if (string.IsNullOrWhiteSpace(externalId))
+            return "";
+        return externalId.Trim().Replace("-", "", StringComparison.Ordinal).ToLowerInvariant();
+    }
+
+    public void CacheRemoteEntry(string providerId, ProviderEntry entry)
+    {
+        ArgumentNullException.ThrowIfNull(entry);
+        var key = RemoteCacheKey(providerId, entry.ExternalId);
+        if (string.IsNullOrEmpty(key))
+            return;
+        lock (_gate)
+            _remoteCache[key] = CloneEntry(entry);
+    }
+
+    public void CacheRemoteEntries(string providerId, IEnumerable<ProviderEntry> entries)
+    {
+        foreach (var entry in entries)
+            CacheRemoteEntry(providerId, entry);
+    }
+
+    public bool TryGetCachedRemote(string providerId, string externalId, out ProviderEntry? entry)
+    {
+        var key = RemoteCacheKey(providerId, externalId);
+        lock (_gate)
+        {
+            if (!string.IsNullOrEmpty(key) && _remoteCache.TryGetValue(key, out var cached))
+            {
+                entry = CloneEntry(cached);
+                return true;
+            }
+        }
+
+        entry = null;
+        return false;
+    }
+
+    /// <summary>
+    /// Resolves a provider-side entry for Diff: live list (normalized id) → cache → title/username fallback.
+    /// </summary>
+    public async Task<ProviderEntry?> FindRemoteEntryAsync(
+        string providerId,
+        string externalId,
+        string? title = null,
+        string? username = null,
+        CancellationToken ct = default)
+    {
+        if (TryGetCachedRemote(providerId, externalId, out var cached) && cached is not null)
+        {
+            // Still refresh from live when connected so Diff is current.
+        }
+
+        IReadOnlyList<ProviderEntry> entries = Array.Empty<ProviderEntry>();
+        try
+        {
+            var provider = await EnsureConnectedAsync(providerId, ct);
+            entries = await provider.ListEntriesAsync(ct);
+            CacheRemoteEntries(providerId, entries);
+        }
+        catch (Exception ex)
+        {
+            LoggingConfiguration.LogException(ex, $"FindRemoteEntry connect/list failed for {providerId}.", nameof(ProviderSessionService));
+            return cached;
+        }
+
+        var norm = NormalizeExternalId(externalId);
+        var hit = entries.FirstOrDefault(e =>
+            string.Equals(NormalizeExternalId(e.ExternalId), norm, StringComparison.Ordinal));
+        if (hit is not null)
+            return hit;
+
+        if (!string.IsNullOrWhiteSpace(title))
+        {
+            hit = entries.FirstOrDefault(e =>
+                string.Equals(e.Title, title, StringComparison.OrdinalIgnoreCase) &&
+                (string.IsNullOrWhiteSpace(username) ||
+                 string.Equals(e.Username, username, StringComparison.OrdinalIgnoreCase)));
+            if (hit is not null)
+                return hit;
+        }
+
+        return cached;
+    }
+
+    private void ClearRemoteCache_NoLock(string providerId)
+    {
+        var prefix = providerId + "\u001f";
+        foreach (var key in _remoteCache.Keys.Where(k => k.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)).ToList())
+            _remoteCache.Remove(key);
+    }
+
+    private static string RemoteCacheKey(string providerId, string? externalId)
+    {
+        var norm = NormalizeExternalId(externalId);
+        return string.IsNullOrEmpty(norm) ? "" : $"{providerId}\u001f{norm}";
+    }
+
+    private static ProviderEntry CloneEntry(ProviderEntry e) =>
+        new()
+        {
+            ExternalId = e.ExternalId,
+            Title = e.Title,
+            Username = e.Username,
+            Password = e.Password,
+            Url = e.Url,
+            Notes = e.Notes,
+            Totp = e.Totp,
+            Path = e.Path,
+            IsFavorite = e.IsFavorite,
+            ItemType = e.ItemType,
+            Fields = new Dictionary<string, string>(e.Fields)
+        };
 
     public async Task ReconnectAllAsync(CancellationToken ct = default)
     {
@@ -147,25 +267,74 @@ public sealed class ProviderSessionService
         ConnectionsChanged?.Invoke(this, EventArgs.Empty);
     }
 
-    public async Task<VaultSyncResult> SyncAllConnectedAsync(CancellationToken ct = default)
+    /// <summary>Fast sync: import missing entries only. Conflict scan is separate / background.</summary>
+    public async Task<VaultSyncResult> SyncProviderImportAsync(string providerId, CancellationToken ct = default)
+    {
+        var live = await EnsureConnectedAsync(providerId, ct);
+        var imported = await new VaultImportService().ImportMissingAsync(live, ct);
+        return new VaultSyncResult { Imported = imported };
+    }
+
+    public async Task<VaultSyncResult> SyncAllImportAsync(CancellationToken ct = default)
     {
         var total = new VaultSyncResult();
         foreach (var provider in LiveConnected.ToList())
         {
             ct.ThrowIfCancellationRequested();
-            var part = await new VaultImportService().ReconcileAsync(provider, ct);
-            total.Imported += part.Imported;
-            total.Unchanged += part.Unchanged;
-            total.Conflicts += part.Conflicts;
+            var imported = await new VaultImportService().ImportMissingAsync(provider, ct);
+            total.Imported += imported;
         }
 
         return total;
     }
 
-    public async Task<VaultSyncResult> SyncProviderAsync(string providerId, CancellationToken ct = default)
+    /// <summary>Background-friendly hash conflict scan for one connected provider.</summary>
+    public async Task<VaultSyncResult> ScanConflictsAsync(string providerId, CancellationToken ct = default)
     {
         var live = await EnsureConnectedAsync(providerId, ct);
-        return await new VaultImportService().ReconcileAsync(live, ct);
+        var result = await new VaultImportService().ScanConflictsAsync(live, ct);
+        ConflictScanCompleted?.Invoke(this, result);
+        return result;
+    }
+
+    public async Task<VaultSyncResult> ScanAllConflictsAsync(CancellationToken ct = default)
+    {
+        var total = new VaultSyncResult();
+        foreach (var provider in LiveConnected.ToList())
+        {
+            ct.ThrowIfCancellationRequested();
+            var part = await new VaultImportService().ScanConflictsAsync(provider, ct);
+            total.Unchanged += part.Unchanged;
+            total.Conflicts += part.Conflicts;
+        }
+
+        ConflictScanCompleted?.Invoke(this, total);
+        return total;
+    }
+
+    /// <summary>Legacy full reconcile (import + scan). Prefer import + background scan for UI.</summary>
+    public async Task<VaultSyncResult> SyncProviderAsync(string providerId, CancellationToken ct = default)
+    {
+        var import = await SyncProviderImportAsync(providerId, ct);
+        var scan = await ScanConflictsAsync(providerId, ct);
+        return new VaultSyncResult
+        {
+            Imported = import.Imported,
+            Unchanged = scan.Unchanged,
+            Conflicts = scan.Conflicts
+        };
+    }
+
+    public async Task<VaultSyncResult> SyncAllConnectedAsync(CancellationToken ct = default)
+    {
+        var import = await SyncAllImportAsync(ct);
+        var scan = await ScanAllConflictsAsync(ct);
+        return new VaultSyncResult
+        {
+            Imported = import.Imported,
+            Unchanged = scan.Unchanged,
+            Conflicts = scan.Conflicts
+        };
     }
 
     /// <summary>Reconnects a saved provider without importing/reconciling.</summary>

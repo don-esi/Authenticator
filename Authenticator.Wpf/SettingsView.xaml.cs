@@ -509,12 +509,10 @@ public partial class SettingsView : UserControl
 
         if (seconds > 0 && !_lockStore.Load().HasUnlockMethod)
         {
-            MessageBox.Show(
+            AppDialog.Alert(
                 Window.GetWindow(this),
                 "Set a PIN, register a YubiKey, or enable Windows Hello before enabling auto-lock.",
-                "Auto-lock",
-                MessageBoxButton.OK,
-                MessageBoxImage.Information);
+                "Auto-lock");
             return;
         }
 
@@ -571,24 +569,22 @@ public partial class SettingsView : UserControl
 
         if (credentials.UnlockMethodCount <= 1 && credentials.HasEncryptedVault)
         {
-            MessageBox.Show(
+            AppDialog.Alert(
                 Window.GetWindow(this),
                 "Cannot clear the last unlock method while secrets are encrypted. Add another unlock method first.",
                 "Clear PIN",
-                MessageBoxButton.OK,
-                MessageBoxImage.Information);
+                AppDialogKind.Warning);
             return;
         }
 
         if (!credentials.YubiKeyEnabled && !credentials.HelloUnlockEnabled && _timeoutSeconds > 0)
         {
-            var confirm = MessageBox.Show(
+            if (!AppDialog.Confirm(
                 Window.GetWindow(this),
                 "Clearing the only unlock method will also turn auto-lock off. Continue?",
                 "Clear PIN",
-                MessageBoxButton.YesNo,
-                MessageBoxImage.Question);
-            if (confirm != MessageBoxResult.Yes)
+                confirmText: "Clear PIN",
+                kind: AppDialogKind.Confirm))
                 return;
         }
 
@@ -642,24 +638,22 @@ public partial class SettingsView : UserControl
 
         if (credentials.UnlockMethodCount <= 1 && credentials.HasEncryptedVault)
         {
-            MessageBox.Show(
+            AppDialog.Alert(
                 Window.GetWindow(this),
                 "Cannot remove the last unlock method while secrets are encrypted. Add another unlock method first.",
                 "Remove YubiKey",
-                MessageBoxButton.OK,
-                MessageBoxImage.Information);
+                AppDialogKind.Warning);
             return;
         }
 
         if (!credentials.PinEnabled && !credentials.HelloUnlockEnabled && _timeoutSeconds > 0)
         {
-            var confirm = MessageBox.Show(
+            if (!AppDialog.Confirm(
                 Window.GetWindow(this),
                 "Removing the only unlock method will also turn auto-lock off. Continue?",
                 "Remove YubiKey",
-                MessageBoxButton.YesNo,
-                MessageBoxImage.Question);
-            if (confirm != MessageBoxResult.Yes)
+                confirmText: "Remove",
+                kind: AppDialogKind.Confirm))
                 return;
         }
 
@@ -727,24 +721,22 @@ public partial class SettingsView : UserControl
 
         if (credentials.UnlockMethodCount <= 1 && credentials.HasEncryptedVault)
         {
-            MessageBox.Show(
+            AppDialog.Alert(
                 Window.GetWindow(this),
                 "Cannot remove the last unlock method while secrets are encrypted. Add another unlock method first.",
                 "Remove Windows Hello",
-                MessageBoxButton.OK,
-                MessageBoxImage.Information);
+                AppDialogKind.Warning);
             return;
         }
 
         if (!credentials.PinEnabled && !credentials.YubiKeyEnabled && _timeoutSeconds > 0)
         {
-            var confirm = MessageBox.Show(
+            if (!AppDialog.Confirm(
                 Window.GetWindow(this),
                 "Removing the only unlock method will also turn auto-lock off. Continue?",
                 "Remove Windows Hello",
-                MessageBoxButton.YesNo,
-                MessageBoxImage.Question);
-            if (confirm != MessageBoxResult.Yes)
+                confirmText: "Remove",
+                kind: AppDialogKind.Confirm))
                 return;
         }
 
