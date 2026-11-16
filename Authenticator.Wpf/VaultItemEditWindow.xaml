@@ -69,9 +69,19 @@
 								<ColumnDefinition Width="Auto" />
 								<ColumnDefinition Width="Auto" />
 							</Grid.ColumnDefinitions>
-							<PasswordBox x:Name="PassMasked"
-								Style="{StaticResource DialogPassword}"
-								AutomationProperties.Name="Password" />
+							<Grid>
+								<PasswordBox x:Name="PassMasked"
+									Style="{StaticResource DialogPassword}"
+									AutomationProperties.Name="Password" />
+								<!-- Shown when a stored password exists but is not yet revealed/edited. -->
+								<TextBlock x:Name="PassPlaceholder"
+									Text="••••••••••••"
+									Margin="10,0,0,0"
+									VerticalAlignment="Center"
+									IsHitTestVisible="False"
+									Visibility="Collapsed"
+									Foreground="{DynamicResource SecondaryTextBrush}" />
+							</Grid>
 							<TextBox x:Name="PassPlain"
 								Style="{StaticResource DialogInput}"
 								Visibility="Collapsed"
@@ -96,7 +106,16 @@
 						<TextBlock Text="URL" Style="{StaticResource DialogLabel}" />
 						<TextBox x:Name="UrlBox"
 							Style="{StaticResource DialogInput}"
+							Margin="0,0,0,12"
 							AutomationProperties.Name="URL" />
+
+						<TextBlock Text="Linked sources (origin ids)" Style="{StaticResource DialogLabel}" />
+						<TextBlock x:Name="LinkedSourcesText"
+							FontSize="12"
+							TextWrapping="Wrap"
+							Foreground="{DynamicResource SecondaryTextBrush}"
+							Text="None — saves to Shared only until imported/synced from a provider."
+							AutomationProperties.Name="Linked sources" />
 					</StackPanel>
 				</Border>
 

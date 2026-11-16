@@ -46,6 +46,12 @@ public interface IVaultProvider
     Task ConnectAsync(ProviderConnectRequest request, CancellationToken ct = default);
     void Disconnect();
     Task<IReadOnlyList<ProviderEntry>> ListEntriesAsync(CancellationToken ct = default);
+
+    /// <summary>
+    /// Updates an existing provider entry identified by <see cref="ProviderEntry.ExternalId"/>
+    /// (origin store id). No-op capability when <see cref="ProviderCapabilities.SupportsWriteBack"/> is false.
+    /// </summary>
+    Task UpdateEntryAsync(ProviderEntry entry, CancellationToken ct = default);
 }
 
 public static class VaultProviderCatalog

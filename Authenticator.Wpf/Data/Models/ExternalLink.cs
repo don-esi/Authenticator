@@ -18,6 +18,10 @@ public class ExternalLink
     [MaxLength(50)]
     public string Provider { get; set; } = string.Empty;
 
+    /// <summary>
+    /// Origin store id in the provider vault (KeePass UUID, LastPass account id, etc.).
+    /// Required to push Shared edits back to the connected source.
+    /// </summary>
     [Required]
     [MaxLength(200)]
     public string ExternalId { get; set; } = string.Empty;

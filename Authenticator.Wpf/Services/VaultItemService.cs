@@ -100,6 +100,44 @@ public sealed class VaultItemService
         return item?.Password;
     }
 
+    /// <summary>
+    /// Builds an id→plaintext password map for search. Loaded on demand when the user types a query.
+    /// </summary>
+    public async Task<Dictionary<Guid, string>> GetPasswordIndexAsync(CancellationToken ct = default)
+    {
+        List<(Guid Id, string? Password)> rows;
+        if (ConnectionConfig.IsOfflineMode)
+        {
+            var offlineItems = await _offline.GetItemsAsync(favoritesOnly: false, includeDeleted: false, ct);
+            rows = offlineItems.Select(i => (i.Id, i.Password)).ToList();
+        }
+        else
+        {
+            await using var db = new AuthenticatorDbContext();
+            rows = await db.VaultItems.AsNoTracking()
+                .Where(i => !i.IsDeleted)
+                .Select(i => new ValueTuple<Guid, string?>(i.Id, i.Password))
+                .ToListAsync(ct);
+        }
+
+        var index = new Dictionary<Guid, string>(rows.Count);
+        foreach (var (id, password) in rows)
+        {
+            if (string.IsNullOrEmpty(password))
+                continue;
+            try
+            {
+                index[id] = _secrets.IsEncrypted(password) ? _secrets.Unprotect(password) : password;
+            }
+            catch (Exception ex)
+            {
+                LoggingConfiguration.LogException(ex, $"Failed to decrypt password for search index ({id}).", nameof(VaultItemService));
+            }
+        }
+
+        return index;
+    }
+
     public async Task<VaultItem> SaveAsync(VaultItem item, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(item);

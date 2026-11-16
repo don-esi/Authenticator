@@ -147,28 +147,36 @@ public sealed class ProviderSessionService
         ConnectionsChanged?.Invoke(this, EventArgs.Empty);
     }
 
-    public async Task<int> SyncAllConnectedAsync(CancellationToken ct = default)
+    public async Task<VaultSyncResult> SyncAllConnectedAsync(CancellationToken ct = default)
     {
-        var total = 0;
+        var total = new VaultSyncResult();
         foreach (var provider in LiveConnected.ToList())
         {
             ct.ThrowIfCancellationRequested();
-            total += await new VaultImportService().BulkImportAsync(provider, ct);
+            var part = await new VaultImportService().ReconcileAsync(provider, ct);
+            total.Imported += part.Imported;
+            total.Unchanged += part.Unchanged;
+            total.Conflicts += part.Conflicts;
         }
 
         return total;
     }
 
-    public async Task<int> SyncProviderAsync(string providerId, CancellationToken ct = default)
+    public async Task<VaultSyncResult> SyncProviderAsync(string providerId, CancellationToken ct = default)
     {
-        if (!TryGetLive(providerId, out var live) || live is null)
-        {
-            var record = _store.Find(providerId)
-                         ?? throw new InvalidOperationException($"{providerId} is not connected.");
-            live = await ReconnectOneAsync(record, ct);
-        }
+        var live = await EnsureConnectedAsync(providerId, ct);
+        return await new VaultImportService().ReconcileAsync(live, ct);
+    }
 
-        return await new VaultImportService().BulkImportAsync(live, ct);
+    /// <summary>Reconnects a saved provider without importing/reconciling.</summary>
+    public async Task<IVaultProvider> EnsureConnectedAsync(string providerId, CancellationToken ct = default)
+    {
+        if (TryGetLive(providerId, out var live) && live is not null)
+            return live;
+
+        var record = _store.Find(providerId)
+                     ?? throw new InvalidOperationException($"{providerId} is not connected.");
+        return await ReconnectOneAsync(record, ct);
     }
 
     private async Task<IVaultProvider> ReconnectOneAsync(ProviderConnectionRecord record, CancellationToken ct)

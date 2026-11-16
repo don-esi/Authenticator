@@ -1,6 +1,7 @@
 <UserControl x:Class="Authenticator.VaultView"
 	xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
 	xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+	xmlns:local="clr-namespace:Authenticator"
 	xmlns:syncfusion="http://schemas.syncfusion.com/wpf"
 	Background="Transparent">
 	<UserControl.Resources>
@@ -87,7 +88,10 @@
 										   HorizontalAlignment="Center" VerticalAlignment="Center" />
 							</Border>
 							<Border Width="14" Height="14" HorizontalAlignment="Left" VerticalAlignment="Top"
-									Margin="-2,-2,0,0" CornerRadius="4" Background="{Binding BadgeBrush}">
+									Margin="-2,-2,0,0" CornerRadius="4" Background="{Binding BadgeBrush}"
+									Cursor="{Binding BadgeCursor}" ToolTip="{Binding BadgeToolTip}"
+									Tag="{Binding}"
+									MouseLeftButtonDown="Badge_MouseLeftButtonDown">
 								<TextBlock FontFamily="Segoe MDL2 Assets" FontSize="8" Foreground="White"
 										   Text="{Binding BadgeGlyph}" HorizontalAlignment="Center" VerticalAlignment="Center" />
 							</Border>
@@ -125,6 +129,57 @@
 				</Border>
 			</Grid>
 		</DataTemplate>
+
+		<DataTemplate x:Key="VaultGroupHeaderTemplate">
+			<Button Margin="0,8,0,4"
+					Padding="4,6"
+					HorizontalAlignment="Stretch"
+					HorizontalContentAlignment="Left"
+					Cursor="Hand"
+					Tag="{Binding}"
+					Click="GroupHeader_Click"
+					ToolTip="Expand or collapse group"
+					AutomationProperties.Name="{Binding Title}">
+				<Button.Style>
+					<Style TargetType="Button" BasedOn="{StaticResource TextActionButton}">
+						<Setter Property="Foreground" Value="{DynamicResource SecondaryTextBrush}" />
+						<Setter Property="Template">
+							<Setter.Value>
+								<ControlTemplate TargetType="Button">
+									<Border Background="{TemplateBinding Background}" Padding="{TemplateBinding Padding}">
+										<ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+														  VerticalAlignment="Center" />
+									</Border>
+								</ControlTemplate>
+							</Setter.Value>
+						</Setter>
+					</Style>
+				</Button.Style>
+				<StackPanel Orientation="Horizontal" HorizontalAlignment="Left">
+					<TextBlock FontFamily="Segoe MDL2 Assets"
+							   FontSize="12"
+							   VerticalAlignment="Center"
+							   Margin="0,0,8,0"
+							   Foreground="{DynamicResource SecondaryTextBrush}"
+							   Text="{Binding Chevron}" />
+					<TextBlock Text="{Binding Title}"
+							   FontSize="13"
+							   FontWeight="SemiBold"
+							   VerticalAlignment="Center"
+							   Foreground="{DynamicResource SecondaryTextBrush}" />
+					<TextBlock Text="{Binding CountLabel}"
+							   Margin="8,0,0,0"
+							   FontSize="12"
+							   VerticalAlignment="Center"
+							   Foreground="{DynamicResource SecondaryTextBrush}" />
+				</StackPanel>
+			</Button>
+		</DataTemplate>
+
+		<!-- After item/header templates so StaticResource keys resolve. -->
+		<local:VaultListTemplateSelector x:Key="VaultListTemplateSelector"
+										 ItemTemplate="{StaticResource VaultItemTemplate}"
+										 HeaderTemplate="{StaticResource VaultGroupHeaderTemplate}" />
 	</UserControl.Resources>
 
 	<Grid Margin="12,8,12,4">
@@ -148,6 +203,7 @@
 				<ToggleButton x:Name="ChipAll" Content="All items" Style="{StaticResource VaultFilterChip}" IsChecked="True" Checked="FilterChip_Checked" Unchecked="FilterChip_Unchecked" />
 				<ToggleButton x:Name="ChipFavorites" Content="Favorites" Style="{StaticResource VaultFilterChip}" Checked="FilterChip_Checked" Unchecked="FilterChip_Unchecked" />
 				<ToggleButton x:Name="ChipRecents" Content="Recents" Style="{StaticResource VaultFilterChip}" Checked="FilterChip_Checked" Unchecked="FilterChip_Unchecked" />
+				<ToggleButton x:Name="ChipConflicts" Content="Conflicts" Style="{StaticResource VaultFilterChip}" Visibility="Collapsed" Checked="FilterChip_Checked" Unchecked="FilterChip_Unchecked" />
 			</StackPanel>
 		</ScrollViewer>
 
@@ -156,24 +212,79 @@
 				<ColumnDefinition Width="*" />
 				<ColumnDefinition Width="Auto" />
 			</Grid.ColumnDefinitions>
-			<syncfusion:SfTextBoxExt
-				x:Name="SearchBox"
-				Watermark="Search title, username, URL"
-				TextChanged="SearchBox_TextChanged" />
-			<TextBlock
-				x:Name="FilterHint"
-				Grid.Column="1"
-				Margin="8,0,0,0"
-				VerticalAlignment="Center"
-				FontSize="11"
-				Foreground="{DynamicResource SecondaryTextBrush}" />
+			<Grid>
+				<syncfusion:SfTextBoxExt
+					x:Name="SearchBox"
+					Watermark="Search title, username, URL, password"
+					Padding="8,6,28,6"
+					TextChanged="SearchBox_TextChanged" />
+				<Button x:Name="SearchClearButton"
+						HorizontalAlignment="Right"
+						VerticalAlignment="Center"
+						Margin="0,0,4,0"
+						Padding="4"
+						MinWidth="24"
+						Visibility="Collapsed"
+						Style="{StaticResource IconButton}"
+						ToolTip="Clear search"
+						AutomationProperties.Name="Clear search"
+						Click="SearchClear_Click">
+					<TextBlock FontFamily="Segoe MDL2 Assets"
+							   FontSize="12"
+							   Foreground="{DynamicResource SecondaryTextBrush}"
+							   Text="&#xE711;" />
+				</Button>
+			</Grid>
+			<StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center" Margin="8,0,0,0">
+				<TextBlock
+					x:Name="FilterHint"
+					VerticalAlignment="Center"
+					Margin="0,0,8,0"
+					FontSize="11"
+					Foreground="{DynamicResource SecondaryTextBrush}" />
+				<Button x:Name="GroupButton"
+						Style="{StaticResource IconButton}"
+						ToolTip="Group"
+						AutomationProperties.Name="Group vault items"
+						Click="GroupButton_Click">
+					<TextBlock FontFamily="Segoe MDL2 Assets" FontSize="16"
+							   Foreground="{DynamicResource BrandBlueBrush}" Text="&#xE8F5;" />
+					<Button.ContextMenu>
+						<ContextMenu Opened="GroupMenu_Opened">
+							<MenuItem Header="None" Tag="None" Click="GroupMenuItem_Click" />
+							<Separator />
+							<MenuItem Header="Entry type" Tag="EntryType" Click="GroupMenuItem_Click" />
+							<MenuItem Header="URL domain" Tag="UrlDomain" Click="GroupMenuItem_Click" />
+							<MenuItem Header="Username" Tag="Username" Click="GroupMenuItem_Click" />
+						</ContextMenu>
+					</Button.ContextMenu>
+				</Button>
+				<Button x:Name="SortButton"
+						Margin="2,0,0,0"
+						Style="{StaticResource IconButton}"
+						ToolTip="Sort"
+						AutomationProperties.Name="Sort vault items"
+						Click="SortButton_Click">
+					<TextBlock FontFamily="Segoe MDL2 Assets" FontSize="16"
+							   Foreground="{DynamicResource BrandBlueBrush}" Text="&#xE8CB;" />
+					<Button.ContextMenu>
+						<ContextMenu Opened="SortMenu_Opened">
+							<MenuItem Header="Title A &gt; Z" Tag="TitleAsc" Click="SortMenuItem_Click" />
+							<MenuItem Header="Title Z &gt; A" Tag="TitleDesc" Click="SortMenuItem_Click" />
+							<Separator />
+							<MenuItem Header="Username A &gt; Z" Tag="UsernameAsc" Click="SortMenuItem_Click" />
+							<MenuItem Header="Username Z &gt; A" Tag="UsernameDesc" Click="SortMenuItem_Click" />
+						</ContextMenu>
+					</Button.ContextMenu>
+				</Button>
+			</StackPanel>
 		</Grid>
 
 		<!-- Virtualizing panel (ScrollViewer inside template) — avoids realizing every card on All items. -->
 		<Grid Grid.Row="3">
 			<ItemsControl
 				x:Name="ItemsList"
-				ItemTemplate="{StaticResource VaultItemTemplate}"
+				ItemTemplateSelector="{StaticResource VaultListTemplateSelector}"
 				VirtualizingPanel.IsVirtualizing="True"
 				VirtualizingPanel.VirtualizationMode="Recycling"
 				VirtualizingPanel.ScrollUnit="Pixel"

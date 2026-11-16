@@ -77,6 +77,7 @@ public partial class SettingsView : UserControl
     public event EventHandler? UnlockMethodsChanged;
     public event EventHandler? DataChanged;
     public event EventHandler? DesktopSettingsChanged;
+    public event EventHandler? BackRequested;
 
     public SettingsView()
     {
@@ -470,6 +471,9 @@ public partial class SettingsView : UserControl
         App.Current.ApplyHotkeyPreference(state.GlobalHotkeyEnabled);
         DesktopSettingsChanged?.Invoke(this, EventArgs.Empty);
     }
+
+    private void Back_Click(object sender, RoutedEventArgs e)
+        => BackRequested?.Invoke(this, EventArgs.Empty);
 
     private void ExitApp_Click(object sender, RoutedEventArgs e)
     {

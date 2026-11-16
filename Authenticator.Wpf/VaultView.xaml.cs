@@ -21,18 +21,25 @@ public partial class VaultView : UserControl
         Relevant,
         All,
         Favorites,
-        Recents
+        Recents,
+        Conflicts
     }
 
     private const double SlideActionWidth = 92;
     private const double SlideOpenThreshold = 0.45;
 
     private readonly VaultItemService _vault = new();
+    private readonly VaultUiPreferences _uiPrefs = new();
     private ObservableCollection<VaultRow> _rows = new();
     private ObservableCollection<VaultRow> _allRowsView = new();
     private List<VaultItem> _all = new();
     private Dictionary<Guid, VaultRow> _rowById = new();
+    private Dictionary<Guid, string>? _passwordIndex;
     private VaultFilterMode _filter = VaultFilterMode.All;
+    private VaultSortMode _sortMode = VaultSortMode.TitleAsc;
+    private VaultGroupMode _groupMode = VaultGroupMode.None;
+    /// <summary>Groups start collapsed; only keys the user expands are kept here.</summary>
+    private readonly HashSet<string> _expandedGroups = new(StringComparer.OrdinalIgnoreCase);
     private string? _autoFilter;
     private IReadOnlyList<string> _autoMatchTerms = Array.Empty<string>();
     private bool _chipSync;
@@ -49,12 +56,13 @@ public partial class VaultView : UserControl
     public VaultView()
     {
         InitializeComponent();
+        LoadUiPrefs();
         ItemsList.ItemsSource = _rows;
         _searchDebounce = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(200) };
         _searchDebounce.Tick += (_, _) =>
         {
             _searchDebounce.Stop();
-            ApplyFilter();
+            _ = ApplyFilterAsync();
         };
         _toastTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(1400) };
         _toastTimer.Tick += (_, _) => HideStatusToast();
@@ -74,6 +82,21 @@ public partial class VaultView : UserControl
         };
     }
 
+    private void LoadUiPrefs()
+    {
+        var prefs = _uiPrefs.Load();
+        _sortMode = prefs.SortMode;
+        _groupMode = prefs.GroupMode;
+    }
+
+    private void PersistUiPrefs()
+    {
+        var prefs = _uiPrefs.Load();
+        prefs.SortMode = _sortMode;
+        prefs.GroupMode = _groupMode;
+        _uiPrefs.Save(prefs);
+    }
+
     public async Task ReloadAsync(bool favoritesOnly = false)
     {
         if (favoritesOnly)
@@ -82,12 +105,14 @@ public partial class VaultView : UserControl
         CloseOpenSlide();
         try
         {
+            LoadUiPrefs();
+            _passwordIndex = null;
             // List path: no secret decrypt — filter/tab switches must stay cheap.
             _all = await _vault.GetItemsAsync(favoritesOnly: false, revealSecrets: false);
             var rows = _all.Select(VaultRow.From).ToList();
             _rowById = rows.ToDictionary(r => r.Id);
             _allRowsView = new ObservableCollection<VaultRow>(rows);
-            ApplyFilter();
+            await ApplyFilterAsync();
         }
         catch (Exception ex)
         {
@@ -117,8 +142,90 @@ public partial class VaultView : UserControl
 
     private void SearchBox_TextChanged(object sender, TextChangedEventArgs e)
     {
+        if (SearchClearButton is not null)
+            SearchClearButton.Visibility = string.IsNullOrEmpty(SearchBox.Text)
+                ? Visibility.Collapsed
+                : Visibility.Visible;
         _searchDebounce.Stop();
         _searchDebounce.Start();
+    }
+
+    private void SearchClear_Click(object sender, RoutedEventArgs e)
+    {
+        SearchBox.Text = "";
+        SearchBox.Focus();
+        e.Handled = true;
+    }
+
+    private void SortButton_Click(object sender, RoutedEventArgs e)
+        => OpenButtonMenu(SortButton);
+
+    private void GroupButton_Click(object sender, RoutedEventArgs e)
+        => OpenButtonMenu(GroupButton);
+
+    private static void OpenButtonMenu(Button button)
+    {
+        if (button.ContextMenu is null)
+            return;
+        button.ContextMenu.PlacementTarget = button;
+        button.ContextMenu.Placement = PlacementMode.Bottom;
+        button.ContextMenu.IsOpen = true;
+    }
+
+    private void SortMenu_Opened(object sender, RoutedEventArgs e)
+        => MarkCheckedMenuItems(sender, _sortMode.ToString());
+
+    private void GroupMenu_Opened(object sender, RoutedEventArgs e)
+        => MarkCheckedMenuItems(sender, _groupMode.ToString());
+
+    private static void MarkCheckedMenuItems(object sender, string selectedTag)
+    {
+        if (sender is not ContextMenu menu)
+            return;
+        foreach (var item in menu.Items.OfType<MenuItem>())
+        {
+            var tag = item.Tag?.ToString();
+            item.IsCheckable = tag is not null;
+            item.IsChecked = string.Equals(tag, selectedTag, StringComparison.Ordinal);
+        }
+    }
+
+    private void SortMenuItem_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not MenuItem { Tag: string tag }
+            || !Enum.TryParse<VaultSortMode>(tag, out var mode)
+            || mode == _sortMode)
+            return;
+
+        _sortMode = mode;
+        PersistUiPrefs();
+        ApplyFilter();
+    }
+
+    private void GroupMenuItem_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not MenuItem { Tag: string tag }
+            || !Enum.TryParse<VaultGroupMode>(tag, out var mode)
+            || mode == _groupMode)
+            return;
+
+        _groupMode = mode;
+        _expandedGroups.Clear();
+        PersistUiPrefs();
+        ApplyFilter();
+    }
+
+    private void GroupHeader_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not FrameworkElement { Tag: VaultGroupHeader header })
+            return;
+
+        if (!_expandedGroups.Remove(header.Title))
+            _expandedGroups.Add(header.Title);
+
+        CloseOpenSlide();
+        ItemsList.ItemsSource = BuildGroupedFlatList(_rows);
+        e.Handled = true;
     }
 
     private void FilterChip_Checked(object sender, RoutedEventArgs e)
@@ -130,6 +237,7 @@ public partial class VaultView : UserControl
         var mode = chip == ChipRelevant ? VaultFilterMode.Relevant
             : chip == ChipFavorites ? VaultFilterMode.Favorites
             : chip == ChipRecents ? VaultFilterMode.Recents
+            : chip == ChipConflicts ? VaultFilterMode.Conflicts
             : VaultFilterMode.All;
         SelectFilter(mode, reload: false);
         ApplyFilter();
@@ -140,7 +248,8 @@ public partial class VaultView : UserControl
         if (_chipSync || !IsLoaded)
             return;
         if (ChipRelevant?.IsChecked != true && ChipAll?.IsChecked != true &&
-            ChipFavorites?.IsChecked != true && ChipRecents?.IsChecked != true)
+            ChipFavorites?.IsChecked != true && ChipRecents?.IsChecked != true &&
+            ChipConflicts?.IsChecked != true)
             SelectFilter(_filter, reload: false);
     }
 
@@ -155,10 +264,24 @@ public partial class VaultView : UserControl
         ChipAll.IsChecked = mode == VaultFilterMode.All;
         ChipFavorites.IsChecked = mode == VaultFilterMode.Favorites;
         ChipRecents.IsChecked = mode == VaultFilterMode.Recents;
+        if (ChipConflicts is not null)
+            ChipConflicts.IsChecked = mode == VaultFilterMode.Conflicts;
         _chipSync = false;
         UpdateFilterHint();
         if (reload)
             _ = ReloadAsync();
+    }
+
+    private void UpdateConflictsChip()
+    {
+        if (ChipConflicts is null)
+            return;
+
+        var count = _allRowsView.Count(r => r.HasMismatch);
+        ChipConflicts.Visibility = count > 0 ? Visibility.Visible : Visibility.Collapsed;
+        ChipConflicts.Content = count > 0 ? $"Conflicts ({count})" : "Conflicts";
+        if (count == 0 && _filter == VaultFilterMode.Conflicts)
+            SelectFilter(VaultFilterMode.All, reload: false);
     }
 
     private void UpdateFilterHint()
@@ -175,7 +298,9 @@ public partial class VaultView : UserControl
         FilterHint.Text = $"Filter: {_autoFilter}";
     }
 
-    private void ApplyFilter()
+    private void ApplyFilter() => _ = ApplyFilterAsync();
+
+    private async Task ApplyFilterAsync()
     {
         if (SearchBox is null || ItemsList is null)
             return;
@@ -183,15 +308,10 @@ public partial class VaultView : UserControl
         CloseOpenSlide();
         var q = SearchBox.Text?.Trim() ?? "";
 
-        // Fast path: All items, no search — rebind the cached collection (no rebuild, no decrypt).
-        if (_filter == VaultFilterMode.All && q.Length == 0)
-        {
-            if (ReferenceEquals(ItemsList.ItemsSource, _allRowsView))
-                return;
-            _rows = _allRowsView;
-            ItemsList.ItemsSource = _allRowsView;
-            return;
-        }
+        if (q.Length > 0)
+            await EnsurePasswordIndexAsync();
+
+        UpdateConflictsChip();
 
         IEnumerable<VaultRow> rows = _filter switch
         {
@@ -201,6 +321,7 @@ public partial class VaultView : UserControl
                 .OrderByDescending(i => i.LastUsedAt)
                 .Take(10)
                 .Select(i => _rowById[i.Id]),
+            VaultFilterMode.Conflicts => _allRowsView.Where(r => r.HasMismatch),
             VaultFilterMode.Relevant => FilterRelevantRows(),
             _ => _allRowsView
         };
@@ -208,15 +329,127 @@ public partial class VaultView : UserControl
         if (!string.IsNullOrWhiteSpace(q))
             rows = rows.Where(r => MatchesSearch(q, r));
 
-        if (_filter is not VaultFilterMode.Recents)
-            rows = rows.OrderBy(r => r.SortTitle, StringComparer.OrdinalIgnoreCase);
+        // Recents keep last-used order; other chips honor the sort menu.
+        var nextList = _filter == VaultFilterMode.Recents
+            ? rows.ToList()
+            : SortRows(rows).ToList();
 
-        var nextList = rows.ToList();
-        if (SameRowIds(_rows, nextList))
+        BindRows(nextList);
+    }
+
+    private async Task EnsurePasswordIndexAsync()
+    {
+        if (_passwordIndex is not null)
             return;
+        try
+        {
+            _passwordIndex = await _vault.GetPasswordIndexAsync();
+        }
+        catch (Exception ex)
+        {
+            LoggingConfiguration.LogException(ex, "Failed to build vault password search index.", nameof(VaultView));
+            _passwordIndex = new Dictionary<Guid, string>();
+        }
+    }
 
+    private IEnumerable<VaultRow> SortRows(IEnumerable<VaultRow> rows) => _sortMode switch
+    {
+        VaultSortMode.TitleDesc => rows
+            .OrderByDescending(r => r.SortTitle, StringComparer.OrdinalIgnoreCase),
+        VaultSortMode.UsernameAsc => rows
+            .OrderBy(r => r.Username, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(r => r.SortTitle, StringComparer.OrdinalIgnoreCase),
+        VaultSortMode.UsernameDesc => rows
+            .OrderByDescending(r => r.Username, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(r => r.SortTitle, StringComparer.OrdinalIgnoreCase),
+        _ => rows.OrderBy(r => r.SortTitle, StringComparer.OrdinalIgnoreCase)
+    };
+
+    private void BindRows(List<VaultRow> nextList)
+    {
+        if (_groupMode == VaultGroupMode.None)
+        {
+            if (SameRowIds(_rows, nextList) && ReferenceEquals(ItemsList.ItemsSource, _rows))
+                return;
+
+            _rows = new ObservableCollection<VaultRow>(nextList);
+            ItemsList.ItemsSource = _rows;
+            return;
+        }
+
+        foreach (var row in nextList)
+            row.GroupKey = GroupKeyFor(row);
+
+        // Recents: keep last-used order inside each group; other chips use the sort menu.
+        nextList = GroupThenSort(nextList, preserveItemOrder: _filter == VaultFilterMode.Recents);
         _rows = new ObservableCollection<VaultRow>(nextList);
-        ItemsList.ItemsSource = _rows;
+
+        // Flat headers + rows — CollectionView GroupStyle breaks virtualized ScrollViewer extent.
+        ItemsList.ItemsSource = BuildGroupedFlatList(nextList);
+    }
+
+    private ObservableCollection<object> BuildGroupedFlatList(IReadOnlyList<VaultRow> rows)
+    {
+        var flat = new ObservableCollection<object>();
+        foreach (var group in rows.GroupBy(r => r.GroupKey, StringComparer.OrdinalIgnoreCase))
+        {
+            var key = group.Key;
+            var items = group.ToList();
+            var expanded = _expandedGroups.Contains(key);
+            flat.Add(new VaultGroupHeader
+            {
+                Title = key,
+                Count = items.Count,
+                IsExpanded = expanded
+            });
+            if (!expanded)
+                continue;
+            foreach (var row in items)
+                flat.Add(row);
+        }
+        return flat;
+    }
+
+    private List<VaultRow> GroupThenSort(List<VaultRow> rows, bool preserveItemOrder)
+    {
+        IEnumerable<IGrouping<string, VaultRow>> groups = rows
+            .GroupBy(r => r.GroupKey)
+            .OrderBy(g => g.Key, StringComparer.OrdinalIgnoreCase);
+
+        var ordered = new List<VaultRow>(rows.Count);
+        foreach (var group in groups)
+            ordered.AddRange(preserveItemOrder ? group : SortRows(group));
+        return ordered;
+    }
+
+    private string GroupKeyFor(VaultRow row) => _groupMode switch
+    {
+        VaultGroupMode.EntryType => FormatEntryType(row.ItemType),
+        VaultGroupMode.UrlDomain => string.IsNullOrWhiteSpace(row.Host) ? "(No domain)" : NormalizeDomain(row.Host),
+        VaultGroupMode.Username => string.IsNullOrWhiteSpace(row.Username) ? "(No username)" : row.Username,
+        _ => ""
+    };
+
+    private static string FormatEntryType(VaultItemType type) => type switch
+    {
+        VaultItemType.SecureNote => "Secure note",
+        VaultItemType.CreditCard => "Credit card",
+        VaultItemType.BankAccount => "Bank account",
+        VaultItemType.EmailAccount => "Email account",
+        VaultItemType.InstantMessenger => "Instant messenger",
+        VaultItemType.SshKey => "SSH key",
+        VaultItemType.DriverLicense => "Driver license",
+        VaultItemType.HealthInsurance => "Health insurance",
+        VaultItemType.Other => "Other",
+        _ => type.ToString()
+    };
+
+    private static string NormalizeDomain(string host)
+    {
+        host = host.Trim().Trim('.').ToLowerInvariant();
+        if (host.StartsWith("www.", StringComparison.Ordinal))
+            host = host[4..];
+        return host;
     }
 
     private IEnumerable<VaultRow> FilterRelevantRows()
@@ -254,11 +487,21 @@ public partial class VaultView : UserControl
         return true;
     }
 
-    private static bool MatchesSearch(string needle, VaultRow r) =>
-        r.Subtitle.Contains(needle, StringComparison.OrdinalIgnoreCase) ||
-        r.Identity.Contains(needle, StringComparison.OrdinalIgnoreCase) ||
-        r.SortTitle.Contains(needle, StringComparison.OrdinalIgnoreCase) ||
-        r.MatchBlob.Contains(needle, StringComparison.OrdinalIgnoreCase);
+    private bool MatchesSearch(string needle, VaultRow r)
+    {
+        if (r.Subtitle.Contains(needle, StringComparison.OrdinalIgnoreCase) ||
+            r.Identity.Contains(needle, StringComparison.OrdinalIgnoreCase) ||
+            r.Username.Contains(needle, StringComparison.OrdinalIgnoreCase) ||
+            r.SortTitle.Contains(needle, StringComparison.OrdinalIgnoreCase) ||
+            r.MatchBlob.Contains(needle, StringComparison.OrdinalIgnoreCase) ||
+            FormatEntryType(r.ItemType).Contains(needle, StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        return _passwordIndex is not null
+               && _passwordIndex.TryGetValue(r.Id, out var password)
+               && !string.IsNullOrEmpty(password)
+               && password.Contains(needle, StringComparison.OrdinalIgnoreCase);
+    }
 
     /// <summary>
     /// Relevance requires a distinctive term: shared domain label, or a strong token
@@ -680,9 +923,9 @@ public partial class VaultView : UserControl
     {
         try
         {
-            var count = await ProviderSessionService.Instance.SyncProviderAsync(providerId);
-            MessageBox.Show($"Synced {count} entries from {providerId}.", "Sync");
+            var result = await ProviderSessionService.Instance.SyncProviderAsync(providerId);
             await ReloadAsync();
+            ReportSyncResult(providerId, result);
         }
         catch (Exception ex)
         {
@@ -694,13 +937,34 @@ public partial class VaultView : UserControl
     {
         try
         {
-            var count = await ProviderSessionService.Instance.SyncAllConnectedAsync();
-            MessageBox.Show($"Synced {count} entries from connected providers.", "Sync");
+            var result = await ProviderSessionService.Instance.SyncAllConnectedAsync();
             await ReloadAsync();
+            ReportSyncResult("connected providers", result);
         }
         catch (Exception ex)
         {
             MessageBox.Show(ex.Message, "Sync failed", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+    }
+
+    private void ReportSyncResult(string source, VaultSyncResult result)
+    {
+        var summary =
+            $"Imported {result.Imported} new, {result.Unchanged} unchanged, {result.Conflicts} conflict(s) from {source}.";
+        if (result.Conflicts > 0)
+        {
+            MessageBox.Show(
+                Window.GetWindow(this),
+                summary + "\n\nOpen the Conflicts chip (or click a red badge) to resolve in Diff/match.",
+                "Sync",
+                MessageBoxButton.OK,
+                MessageBoxImage.Warning);
+            SelectFilter(VaultFilterMode.Conflicts, reload: false);
+            ApplyFilter();
+        }
+        else
+        {
+            MessageBox.Show(Window.GetWindow(this), summary, "Sync", MessageBoxButton.OK, MessageBoxImage.Information);
         }
     }
 
@@ -716,6 +980,17 @@ public partial class VaultView : UserControl
         menu.Items.Add(MakeMenu("Connect to…", () => _ = ConnectToProviderAsync()));
         menu.Items.Add(MakeMenu("Import from…", () => _ = ImportFromProviderAsync()));
 
+        var conflictCount = _allRowsView.Count(r => r.HasMismatch);
+        if (conflictCount > 0)
+        {
+            menu.Items.Add(new Separator());
+            menu.Items.Add(MakeMenu($"Review conflicts ({conflictCount})…", () =>
+            {
+                SelectFilter(VaultFilterMode.Conflicts, reload: false);
+                ApplyFilter();
+            }));
+        }
+
         var saved = ProviderSessionService.Instance.SavedConnections.ToList();
         if (saved.Count > 0)
         {
@@ -727,6 +1002,7 @@ public partial class VaultView : UserControl
                 var label = string.IsNullOrWhiteSpace(conn.DisplayName) ? providerId : conn.DisplayName;
                 var sub = new MenuItem { Header = label };
                 sub.Items.Add(MakeMenu("Sync now", () => _ = SyncConnectedProviderAsync(providerId)));
+                sub.Items.Add(MakeMenu("Review conflicts…", () => _ = OpenFirstConflictForProviderAsync(providerId)));
                 sub.Items.Add(MakeMenu("Disconnect", () => DisconnectProvider(providerId)));
                 menu.Items.Add(sub);
             }
@@ -735,15 +1011,84 @@ public partial class VaultView : UserControl
         menu.IsOpen = true;
     }
 
+    private void Badge_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        if (sender is not FrameworkElement { Tag: VaultRow row } || !row.HasMismatch)
+            return;
+        e.Handled = true;
+        _ = OpenDiffAsync(row);
+    }
+
+    private async Task OpenFirstConflictForProviderAsync(string providerId)
+    {
+        SelectFilter(VaultFilterMode.Conflicts, reload: false);
+        ApplyFilter();
+        var row = _allRowsView.FirstOrDefault(r => r.HasMismatch);
+        if (row is not null)
+            await OpenDiffAsync(row, preferredProviderId: providerId);
+    }
+
+    private async Task OpenDiffAsync(VaultRow row, string? preferredProviderId = null)
+    {
+        try
+        {
+            var item = await _vault.GetByIdAsync(row.Id);
+            if (item is null)
+                return;
+
+            var link = item.ExternalLinks
+                .Where(l => l.IsMismatch)
+                .OrderByDescending(l => string.Equals(l.Provider, preferredProviderId, StringComparison.OrdinalIgnoreCase))
+                .FirstOrDefault()
+                ?? item.ExternalLinks.FirstOrDefault();
+            if (link is null)
+            {
+                MessageBox.Show(Window.GetWindow(this), "This item has no linked provider.", "Diff",
+                    MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+
+            ProviderEntry? remote = null;
+            IVaultProvider? provider = null;
+            try
+            {
+                provider = await ProviderSessionService.Instance.EnsureConnectedAsync(link.Provider);
+            }
+            catch
+            {
+                // Diff can still open with Shared-only values.
+            }
+
+            if (provider is not null)
+            {
+                var entries = await provider.ListEntriesAsync();
+                remote = entries.FirstOrDefault(e =>
+                    string.Equals(e.ExternalId, link.ExternalId, StringComparison.OrdinalIgnoreCase));
+            }
+
+            var win = new DiffMatchWindow(item, remote, link.Provider) { Owner = Window.GetWindow(this) };
+            if (win.ShowDialog() == true)
+                await ReloadAsync();
+        }
+        catch (Exception ex)
+        {
+            LoggingConfiguration.LogException(ex, $"Failed to open Diff for {row.Id}.", nameof(VaultView));
+            MessageBox.Show(Window.GetWindow(this), ex.Message, "Diff", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+    }
+
     public sealed class VaultRow : INotifyPropertyChanged
     {
         private bool _isFavorite;
 
         public Guid Id { get; set; }
+        public VaultItemType ItemType { get; set; }
         public string Subtitle { get; set; } = "";
         public string Identity { get; set; } = "";
+        public string Username { get; set; } = "";
         public string SortTitle { get; set; } = "";
         public string Host { get; set; } = "";
+        public string GroupKey { get; set; } = "";
         /// <summary>Lowercased title/username/host/url blob for partial relevance matching.</summary>
         public string MatchBlob { get; set; } = "";
         public string[] MatchTokens { get; set; } = Array.Empty<string>();
@@ -762,8 +1107,11 @@ public partial class VaultView : UserControl
         }
         public string Initial { get; set; } = "?";
         public Brush IconBrush { get; set; } = Brushes.Gray;
+        public bool HasMismatch { get; set; }
         public string BadgeGlyph { get; set; } = "\uE77B";
         public Brush BadgeBrush { get; set; } = AccountEdits.BrushFromHex("#1A73E8");
+        public Cursor BadgeCursor => HasMismatch ? Cursors.Hand : Cursors.Arrow;
+        public string? BadgeToolTip => HasMismatch ? "Conflict — open Diff/match" : null;
         public string Star => IsFavorite ? "★" : "☆";
         public Brush StarBrush => IsFavorite
             ? AccountEdits.BrushFromHex("#F5B301")
@@ -774,11 +1122,10 @@ public partial class VaultView : UserControl
         public static VaultRow From(VaultItem item)
         {
             var host = TryHost(item.Url);
+            var username = item.Username?.Trim() ?? "";
             var subtitle = !string.IsNullOrWhiteSpace(host) ? host : item.Title;
             // Secondary line: username when present, otherwise host (never duplicate the title).
-            var identity = !string.IsNullOrWhiteSpace(item.Username)
-                ? item.Username!
-                : host;
+            var identity = !string.IsNullOrWhiteSpace(username) ? username : host;
             var seed = string.IsNullOrWhiteSpace(item.Title) ? identity : item.Title;
             var blob = string.Join(' ',
                 item.Title,
@@ -791,16 +1138,19 @@ public partial class VaultView : UserControl
             return new VaultRow
             {
                 Id = item.Id,
+                ItemType = item.ItemType,
                 Subtitle = subtitle,
                 Identity = identity,
+                Username = username,
                 SortTitle = item.Title,
                 Host = host,
                 MatchBlob = blob,
                 MatchTokens = tokens.ToArray(),
                 IsFavorite = item.IsFavorite,
+                HasMismatch = item.HasMismatch,
                 Initial = string.IsNullOrWhiteSpace(seed) ? "?" : seed.Trim()[..1].ToUpperInvariant(),
                 IconBrush = AccountEdits.InitialBrush(seed),
-                BadgeGlyph = GlyphFor(item.ItemType),
+                BadgeGlyph = item.HasMismatch ? "\uE7BA" : GlyphFor(item.ItemType), // Warning / type
                 BadgeBrush = item.HasMismatch
                     ? AccountEdits.BrushFromHex("#B00020")
                     : AccountEdits.BrushFromHex("#1A73E8")
@@ -837,4 +1187,22 @@ public partial class VaultView : UserControl
             return "";
         }
     }
+}
+
+public sealed class VaultGroupHeader
+{
+    public string Title { get; init; } = "";
+    public int Count { get; init; }
+    public bool IsExpanded { get; init; }
+    public string Chevron => IsExpanded ? "\uE70D" : "\uE76C"; // ChevronDown / ChevronRight
+    public string CountLabel => $"({Count})";
+}
+
+public sealed class VaultListTemplateSelector : DataTemplateSelector
+{
+    public DataTemplate? ItemTemplate { get; set; }
+    public DataTemplate? HeaderTemplate { get; set; }
+
+    public override DataTemplate? SelectTemplate(object item, DependencyObject container)
+        => item is VaultGroupHeader ? HeaderTemplate : ItemTemplate;
 }

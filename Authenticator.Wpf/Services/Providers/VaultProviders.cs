@@ -28,6 +28,24 @@ internal abstract class MemoryVaultProvider : IVaultProvider
     public Task<IReadOnlyList<ProviderEntry>> ListEntriesAsync(CancellationToken ct = default) =>
         Task.FromResult<IReadOnlyList<ProviderEntry>>(IsConnected ? _entries : Array.Empty<ProviderEntry>());
 
+    public Task UpdateEntryAsync(ProviderEntry entry, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(entry);
+        if (!IsConnected)
+            throw new InvalidOperationException($"{DisplayName} is not connected.");
+        if (string.IsNullOrWhiteSpace(entry.ExternalId))
+            throw new ArgumentException("Origin store id (ExternalId) is required.", nameof(entry));
+
+        var index = _entries.FindIndex(e =>
+            string.Equals(e.ExternalId, entry.ExternalId, StringComparison.Ordinal));
+        if (index < 0)
+            throw new InvalidOperationException(
+                $"No {DisplayName} entry with origin id '{entry.ExternalId}'.");
+
+        _entries[index] = entry;
+        return Task.CompletedTask;
+    }
+
     protected void SetEntries(IEnumerable<ProviderEntry> entries)
     {
         _entries = entries.ToList();
@@ -68,7 +86,8 @@ internal sealed class KeePassVaultProvider : MemoryVaultProvider
         RequiresFilePath = true,
         SupportsSecureNotes = true,
         SupportsFavorites = true,
-        SupportsWriteBack = false
+        // Live session write-back by origin id (kdbx on-disk save not in PasswordManager.KeyPass yet).
+        SupportsWriteBack = true
     };
 
     public override Task ConnectAsync(ProviderConnectRequest request, CancellationToken ct = default)
@@ -94,7 +113,8 @@ internal sealed class OpVaultProvider : MemoryVaultProvider
     public override ProviderCapabilities Capabilities { get; } = new()
     {
         RequiresFilePath = true,
-        SupportsSecureNotes = true
+        SupportsSecureNotes = true,
+        SupportsWriteBack = true
     };
 
     public override Task ConnectAsync(ProviderConnectRequest request, CancellationToken ct = default)
@@ -116,7 +136,8 @@ internal sealed class LastPassVaultProvider : MemoryVaultProvider
         RequiresUsername = true,
         SupportsFavorites = true,
         SupportsSecureNotes = true,
-        SupportsWriteBack = false
+        // Live session write-back by origin id (LastPass remote API write not wired yet).
+        SupportsWriteBack = true
     };
 
     public override async Task ConnectAsync(ProviderConnectRequest request, CancellationToken ct = default)
@@ -187,7 +208,8 @@ internal abstract class CloudStubProvider : MemoryVaultProvider
     public override ProviderCapabilities Capabilities { get; } = new()
     {
         RequiresUsername = true,
-        SupportsSecureNotes = true
+        SupportsSecureNotes = true,
+        SupportsWriteBack = true
     };
 
     public override Task ConnectAsync(ProviderConnectRequest request, CancellationToken ct = default)

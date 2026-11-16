@@ -44,6 +44,7 @@ public partial class MainWindow : Window
     private readonly DispatcherTimer _dockMouseLeaveTimer;
     private readonly SqlDiscoveryService _discovery = new();
     private bool _vaultTabActive;
+    private UIElement? _pageBeforeSettings;
 
     public MainWindow()
     {
@@ -70,6 +71,12 @@ public partial class MainWindow : Window
             LoadUiDesktopPrefs();
             ApplyTopmost();
             App.Current.ApplyHotkeyPreference(_uiPrefs.Load().GlobalHotkeyEnabled);
+        };
+        SettingsPage.BackRequested += (_, _) =>
+        {
+            var previous = _pageBeforeSettings
+                ?? (_vaultTabActive ? (UIElement)VaultPage : CodesPage);
+            ShowPage(previous);
         };
         _lockTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
         _lockTimer.Tick += (_, _) => CheckAutoLock();
@@ -1148,6 +1155,9 @@ public partial class MainWindow : Window
 
     private void ShowPage(UIElement page)
     {
+        if (page == SettingsPage && SettingsPage.Visibility != Visibility.Visible)
+            _pageBeforeSettings = CurrentVisiblePage() ?? (_vaultTabActive ? VaultPage : CodesPage);
+
         CodesPage.Visibility = page == CodesPage ? Visibility.Visible : Visibility.Collapsed;
         BackupPage.Visibility = page == BackupPage ? Visibility.Visible : Visibility.Collapsed;
         VaultPage.Visibility = page == VaultPage ? Visibility.Visible : Visibility.Collapsed;
@@ -1162,6 +1172,15 @@ public partial class MainWindow : Window
             CodesContextBar.Visibility = Visibility.Collapsed;
             VaultContextBar.Visibility = Visibility.Collapsed;
         }
+    }
+
+    private UIElement? CurrentVisiblePage()
+    {
+        if (CodesPage.Visibility == Visibility.Visible) return CodesPage;
+        if (BackupPage.Visibility == Visibility.Visible) return BackupPage;
+        if (VaultPage.Visibility == Visibility.Visible) return VaultPage;
+        if (SettingsPage.Visibility == Visibility.Visible) return SettingsPage;
+        return null;
     }
 
     private void UpdateTopTabs()

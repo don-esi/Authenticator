@@ -1,6 +1,7 @@
 using System.Windows;
 using Authenticator.Data.Models;
 using Authenticator.Services;
+using Authenticator.Services.Providers;
 
 namespace Authenticator;
 
@@ -12,6 +13,7 @@ public partial class VaultItemEditWindow : Window
     private bool _passwordRevealed;
     private bool _passwordLoaded;
     private bool _passwordTouched;
+    private bool _hasStoredPassword;
     private string? _sealedPassword;
 
     public VaultItemEditWindow(VaultItem item, bool isNew = false)
@@ -25,6 +27,7 @@ public partial class VaultItemEditWindow : Window
         {
             _sealedPassword = item.Password;
             _item.Password = null;
+            _hasStoredPassword = true;
         }
 
         foreach (VaultItemType t in Enum.GetValues(typeof(VaultItemType)))
@@ -37,8 +40,13 @@ public partial class VaultItemEditWindow : Window
         TotpBox.Text = item.TotpSecret ?? "";
         LinkedBox.Text = item.LinkedAccountId?.ToString() ?? "";
         FavoriteCheck.IsChecked = item.IsFavorite;
+        UpdateLinkedSourcesSummary(item);
 
-        PassMasked.PasswordChanged += (_, _) => _passwordTouched = true;
+        PassMasked.PasswordChanged += (_, _) =>
+        {
+            _passwordTouched = true;
+            UpdatePasswordPlaceholder();
+        };
         PassPlain.TextChanged += (_, _) => _passwordTouched = true;
 
         if (_isNew)
@@ -47,6 +55,32 @@ public partial class VaultItemEditWindow : Window
             RevealPassButton.Content = "Hide";
             SetPasswordRevealed(true);
         }
+        else
+        {
+            UpdatePasswordPlaceholder();
+        }
+    }
+
+    private void UpdateLinkedSourcesSummary(VaultItem item)
+    {
+        if (LinkedSourcesText is null)
+            return;
+
+        var links = item.ExternalLinks?
+            .Where(l => !string.IsNullOrWhiteSpace(l.Provider))
+            .OrderBy(l => l.Provider, StringComparer.OrdinalIgnoreCase)
+            .ToList() ?? [];
+
+        if (links.Count == 0)
+        {
+            LinkedSourcesText.Text = "None — saves to Shared only until imported/synced from a provider.";
+            return;
+        }
+
+        LinkedSourcesText.Text = string.Join(
+            Environment.NewLine,
+            links.Select(l =>
+                $"{l.Provider}: {l.ExternalId}" + (l.IsMismatch ? " (conflict)" : "")));
     }
 
     private void Cancel_Click(object sender, RoutedEventArgs e)
@@ -62,6 +96,7 @@ public partial class VaultItemEditWindow : Window
             PassMasked.Password = PassPlain.Text;
             SetPasswordRevealed(false);
             RevealPassButton.Content = "Reveal";
+            UpdatePasswordPlaceholder();
             return;
         }
 
@@ -73,6 +108,7 @@ public partial class VaultItemEditWindow : Window
                 var password = await _vault.GetPasswordAsync(_item.Id);
                 _item.Password = password;
                 _sealedPassword = null;
+                _hasStoredPassword = !string.IsNullOrEmpty(password);
                 _passwordLoaded = true;
                 // Don't mark touched — loading existing value is not an edit.
                 var priorTouched = _passwordTouched;
@@ -91,6 +127,7 @@ public partial class VaultItemEditWindow : Window
 
         SetPasswordRevealed(true);
         RevealPassButton.Content = "Hide";
+        UpdatePasswordPlaceholder();
     }
 
     private void Generate_Click(object sender, RoutedEventArgs e)
@@ -101,10 +138,12 @@ public partial class VaultItemEditWindow : Window
 
         _passwordTouched = true;
         _passwordLoaded = true;
+        _hasStoredPassword = true;
         if (_passwordRevealed)
             PassPlain.Text = gen.GeneratedPassword;
         else
             PassMasked.Password = gen.GeneratedPassword;
+        UpdatePasswordPlaceholder();
     }
 
     private async void Save_Click(object sender, RoutedEventArgs e)
@@ -133,6 +172,26 @@ public partial class VaultItemEditWindow : Window
         }
 
         await _vault.SaveAsync(_item);
+
+        // Push Shared edits to every linked origin store (ExternalLink.ExternalId).
+        if (!_isNew)
+        {
+            var push = await new VaultImportService().PushToLinkedProvidersAsync(_item);
+            if (push.Failed > 0 || push.Skipped > 0)
+            {
+                var detail = push.Messages.Count > 0
+                    ? "\n\n" + string.Join("\n", push.Messages.Take(6))
+                    : "";
+                MessageBox.Show(
+                    this,
+                    $"Saved to Shared. Updated {push.Updated} connected source(s); " +
+                    $"{push.Skipped} skipped, {push.Failed} failed.{detail}",
+                    "Vault",
+                    MessageBoxButton.OK,
+                    push.Failed > 0 ? MessageBoxImage.Warning : MessageBoxImage.Information);
+            }
+        }
+
         DialogResult = true;
         Close();
     }
@@ -142,5 +201,19 @@ public partial class VaultItemEditWindow : Window
         _passwordRevealed = revealed;
         PassMasked.Visibility = revealed ? Visibility.Collapsed : Visibility.Visible;
         PassPlain.Visibility = revealed ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    private void UpdatePasswordPlaceholder()
+    {
+        if (PassPlaceholder is null)
+            return;
+
+        // Bullets only when a stored password exists and the masked box is still untouched/empty.
+        var show = !_passwordRevealed
+                   && !_passwordTouched
+                   && !_passwordLoaded
+                   && _hasStoredPassword
+                   && PassMasked.SecurePassword.Length == 0;
+        PassPlaceholder.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
     }
 }

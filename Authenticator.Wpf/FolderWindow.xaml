@@ -116,6 +116,10 @@
                                    VerticalAlignment="Center"
                                    Margin="0,0,8,0" />
                         <Grid Grid.Column="1">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
                             <TextBlock x:Name="SearchHint"
                                        Text="Search"
                                        Foreground="{DynamicResource SecondaryTextBrush}"
@@ -126,9 +130,24 @@
                                      Background="Transparent"
                                      BorderThickness="0"
                                      FontSize="14"
+                                     Padding="0,0,4,0"
                                      Foreground="{DynamicResource PrimaryTextBrush}"
                                      CaretBrush="{DynamicResource PrimaryTextBrush}"
                                      TextChanged="SearchBox_TextChanged" />
+                            <Button x:Name="SearchClearButton"
+                                    Grid.Column="1"
+                                    Padding="4"
+                                    MinWidth="24"
+                                    Visibility="Collapsed"
+                                    Style="{StaticResource IconButton}"
+                                    ToolTip="Clear search"
+                                    AutomationProperties.Name="Clear search"
+                                    Click="SearchClear_Click">
+                                <TextBlock FontFamily="Segoe MDL2 Assets"
+                                           FontSize="12"
+                                           Foreground="{DynamicResource SecondaryTextBrush}"
+                                           Text="&#xE711;" />
+                            </Button>
                         </Grid>
                     </Grid>
                 </Border>

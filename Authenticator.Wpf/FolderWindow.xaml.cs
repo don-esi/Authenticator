@@ -135,8 +135,18 @@ public partial class FolderWindow : Window
 
     private void SearchBox_TextChanged(object sender, TextChangedEventArgs e)
     {
-        SearchHint.Visibility = string.IsNullOrEmpty(SearchBox.Text) ? Visibility.Visible : Visibility.Collapsed;
+        var empty = string.IsNullOrEmpty(SearchBox.Text);
+        SearchHint.Visibility = empty ? Visibility.Visible : Visibility.Collapsed;
+        if (SearchClearButton is not null)
+            SearchClearButton.Visibility = empty ? Visibility.Collapsed : Visibility.Visible;
         ApplyAccountFilter();
+    }
+
+    private void SearchClear_Click(object sender, RoutedEventArgs e)
+    {
+        SearchBox.Text = "";
+        SearchBox.Focus();
+        e.Handled = true;
     }
 
     private void Sort_Click(object sender, RoutedEventArgs e)

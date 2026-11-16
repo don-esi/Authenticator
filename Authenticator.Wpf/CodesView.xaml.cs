@@ -203,8 +203,19 @@ public partial class CodesView : UserControl
 
     private void SearchBox_TextChanged(object sender, TextChangedEventArgs e)
     {
+        if (SearchClearButton is not null)
+            SearchClearButton.Visibility = string.IsNullOrEmpty(SearchBox.Text)
+                ? Visibility.Collapsed
+                : Visibility.Visible;
         ApplyFilter();
         RefreshCodes();
+    }
+
+    private void SearchClear_Click(object sender, RoutedEventArgs e)
+    {
+        SearchBox.Text = "";
+        SearchBox.Focus();
+        e.Handled = true;
     }
 
     private void ApplyFilter()
