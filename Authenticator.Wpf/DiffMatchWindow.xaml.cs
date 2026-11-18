@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Windows;
+using System.Windows.Automation;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
@@ -14,16 +15,41 @@ public partial class DiffMatchWindow : Window
     public const string VaultSourceId = "vault";
 
     private static readonly string[] FieldKeys =
-        ["Title", "Username", "Password", "URL", "Host", "Notes", "Favorite", "TOTP"];
+        ["Title", "Created", "Updated", "Username", "Password", "URL", "Host", "Notes", "Favorite", "TOTP"];
+
+    private static readonly Brush MatchGreenFill = Freeze(new SolidColorBrush(Color.FromArgb(0x28, 0x22, 0xC5, 0x5E)));
+    private static readonly Brush MatchGreenBorder = Freeze(new SolidColorBrush(Color.FromRgb(0x22, 0xC5, 0x5E)));
+    private static readonly Brush DiffAmberFill = Freeze(new SolidColorBrush(Color.FromArgb(0x30, 0xF5, 0x9E, 0x0B)));
+    private static readonly Brush DiffAmberBorder = Freeze(new SolidColorBrush(Color.FromRgb(0xD9, 0x77, 0x06)));
+
+    private static Brush Freeze(SolidColorBrush brush)
+    {
+        brush.Freeze();
+        return brush;
+    }
 
     private readonly VaultItem _item;
     private readonly List<DiffSource> _sources;
     private readonly VaultImportService _import = new();
     private readonly VaultItemService _vaultItems = new();
+    private readonly ReconcileHistoryService _history = new();
     private readonly Dictionary<string, string> _fieldSource = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<(string Field, string SourceId), Border> _cells = new();
+    private readonly Dictionary<string, TextBlock> _fieldLabels = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, Border> _sourceHeaderChrome = new(StringComparer.OrdinalIgnoreCase);
     private string? _correctSourceId;
+    private string? _unlinkProviderId;
     private bool _showPasswords;
+
+    // Explorer-style rename: first click selects; slow second click on selected Vault cell edits.
+    private (string Field, string SourceId)? _lastSelectKey;
+    private DateTime _lastSelectUtc;
+    private bool _isEditing;
+    private bool _endingEdit;
+    private string? _editField;
+    private string? _editOriginal;
+    private Border? _editBorder;
+    private DiffSource? _editSource;
 
     /// <summary>Multi-provider Diff. <paramref name="providerSources"/> are linked providers (remote may be null).</summary>
     public DiffMatchWindow(
@@ -35,10 +61,51 @@ public partial class DiffMatchWindow : Window
         _item = item;
         _sources = BuildSources(item, providerSources);
         TitleText.Text = $"{item.Title} — reconcile ({_sources.Count} sources)";
-        foreach (var field in FieldKeys)
+        foreach (var field in FieldKeys.Where(f => !IsInfoField(f)))
             _fieldSource[field] = VaultSourceId;
         BuildMatrix();
         HighlightSelections();
+    }
+
+    private static bool IsInfoField(string field) => field is "Created" or "Updated";
+
+    private static bool IsEditableVaultField(string field) =>
+        field is "Title" or "Username" or "Password" or "URL" or "Notes" or "Favorite" or "TOTP";
+
+    /// <summary>Same threshold Explorer uses to distinguish double-click from rename click.</summary>
+    private static TimeSpan RenameClickDelay { get; } = TimeSpan.FromMilliseconds(GetDoubleClickTime());
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern uint GetDoubleClickTime();
+
+    private void Window_Loaded(object sender, RoutedEventArgs e) => FitToScreen();
+
+    /// <summary>Grow to fit the matrix when possible; never exceed the work area.</summary>
+    private void FitToScreen()
+    {
+        MatrixHost.UpdateLayout();
+        MatrixHost.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+        var matrix = MatrixHost.DesiredSize;
+
+        // Header + hint row + footer + paddings around the scroll card.
+        const double chromeWidth = 72;
+        const double chromeHeight = 176;
+        var work = SystemParameters.WorkArea;
+        var maxW = Math.Max(MinWidth, work.Width - 32);
+        var maxH = Math.Max(MinHeight, work.Height - 32);
+        var targetW = Math.Clamp(Math.Ceiling(matrix.Width + chromeWidth), MinWidth, maxW);
+        var targetH = Math.Clamp(Math.Ceiling(matrix.Height + chromeHeight), MinHeight, maxH);
+
+        Width = targetW;
+        Height = targetH;
+
+        if (Owner is { } owner && owner.IsVisible)
+        {
+            var left = owner.Left + (owner.ActualWidth - Width) / 2;
+            var top = owner.Top + (owner.ActualHeight - Height) / 2;
+            Left = Math.Clamp(left, work.Left + 8, work.Left + work.Width - Width - 8);
+            Top = Math.Clamp(top, work.Top + 8, work.Top + work.Height - Height - 8);
+        }
     }
 
     /// <summary>Legacy single-provider ctor.</summary>
@@ -71,7 +138,9 @@ public partial class DiffMatchWindow : Window
                 Url = item.Url,
                 Notes = item.Notes,
                 IsFavorite = item.IsFavorite,
-                Totp = item.TotpSecret
+                Totp = item.TotpSecret,
+                CreatedAt = item.CreatedAt == default ? null : item.CreatedAt,
+                ModifiedAt = item.ModifiedAt ?? (item.CreatedAt == default ? null : item.CreatedAt)
             }
         };
 
@@ -92,6 +161,8 @@ public partial class DiffMatchWindow : Window
                 Notes = remote?.Notes,
                 IsFavorite = remote?.IsFavorite ?? false,
                 Totp = remote?.Totp,
+                CreatedAt = remote?.CreatedAt,
+                ModifiedAt = remote?.ModifiedAt,
                 Unavailable = remote is null
             });
         }
@@ -122,12 +193,13 @@ public partial class DiffMatchWindow : Window
         MatrixHost.RowDefinitions.Clear();
         MatrixHost.ColumnDefinitions.Clear();
         _cells.Clear();
+        _fieldLabels.Clear();
+        _sourceHeaderChrome.Clear();
 
-        MatrixHost.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(100) });
+        MatrixHost.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(110) });
         foreach (var _ in _sources)
             MatrixHost.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(220) });
 
-        // Header row
         MatrixHost.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         var fieldHdr = new TextBlock
         {
@@ -153,13 +225,23 @@ public partial class DiffMatchWindow : Window
         {
             MatrixHost.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             var field = FieldKeys[r];
+            var differs = !IsInfoField(field) && FieldRowDiffers(field);
             var label = new TextBlock
             {
-                Text = field,
+                Text = differs ? $"{field} ●" : field,
                 Margin = new Thickness(0, 0, 8, 8),
                 VerticalAlignment = VerticalAlignment.Center,
-                Foreground = (Brush)FindResource("SecondaryTextBrush")
+                FontWeight = differs ? FontWeights.SemiBold : FontWeights.Normal,
+                Foreground = differs
+                    ? DiffAmberBorder
+                    : (Brush)FindResource("SecondaryTextBrush"),
+                ToolTip = IsInfoField(field)
+                    ? "Informational only — not used for match or Apply"
+                    : differs
+                        ? "Values differ across sources — click a cell to pick"
+                        : null
             };
+            _fieldLabels[field] = label;
             Grid.SetRow(label, r + 1);
             Grid.SetColumn(label, 0);
             MatrixHost.Children.Add(label);
@@ -178,36 +260,95 @@ public partial class DiffMatchWindow : Window
 
     private UIElement BuildSourceHeader(DiffSource source)
     {
+        var matchState = GetSourceMatchState(source);
         var panel = new StackPanel { Margin = new Thickness(0, 0, 8, 10) };
-        var title = new TextBlock
+
+        var chrome = new Border
         {
-            Text = source.DisplayName + (source.IsMismatch ? " ⚠" : ""),
-            FontWeight = FontWeights.SemiBold,
-            Margin = new Thickness(0, 0, 0, 6)
-        };
-        var check = new CheckBox
-        {
-            Content = "This is correct",
-            FontSize = 15,
-            FontWeight = FontWeights.SemiBold,
-            Tag = source.Id,
-            IsEnabled = !source.Unavailable,
-            Padding = new Thickness(4),
-            MinHeight = 36
-        };
-        check.Checked += CorrectSource_Checked;
-        check.Unchecked += CorrectSource_Unchecked;
-        panel.Children.Add(title);
-        panel.Children.Add(check);
-        if (source.Unavailable)
-        {
-            panel.Children.Add(new TextBlock
+            CornerRadius = new CornerRadius(10),
+            Padding = new Thickness(10, 8, 10, 8),
+            Margin = new Thickness(0, 0, 0, 8),
+            BorderThickness = new Thickness(1.5),
+            Background = matchState switch
             {
-                Text = "(unavailable — reconnect)",
-                FontSize = 11,
-                Foreground = (Brush)FindResource("SecondaryTextBrush"),
-                Margin = new Thickness(0, 4, 0, 0)
-            });
+                SourceMatchState.MatchesVault => MatchGreenFill,
+                SourceMatchState.Differs => DiffAmberFill,
+                _ => (Brush)FindResource("SecondaryBackgroundBrush")
+            },
+            BorderBrush = matchState switch
+            {
+                SourceMatchState.MatchesVault => MatchGreenBorder,
+                SourceMatchState.Differs => DiffAmberBorder,
+                _ => (Brush)FindResource("BorderBrushColor")
+            }
+        };
+        _sourceHeaderChrome[source.Id] = chrome;
+
+        var titleRow = new StackPanel();
+        titleRow.Children.Add(new TextBlock
+        {
+            Text = source.DisplayName,
+            FontWeight = FontWeights.SemiBold,
+            FontSize = 15
+        });
+        titleRow.Children.Add(new TextBlock
+        {
+            Text = matchState switch
+            {
+                SourceMatchState.Vault => "Current vault values",
+                SourceMatchState.MatchesVault => "✓ Matches vault",
+                SourceMatchState.Differs => "⚠ Differs from vault",
+                SourceMatchState.Unavailable => "Unavailable — reconnect",
+                _ => ""
+            },
+            FontSize = 12,
+            Margin = new Thickness(0, 2, 0, 0),
+            Foreground = matchState switch
+            {
+                SourceMatchState.MatchesVault => MatchGreenBorder,
+                SourceMatchState.Differs => DiffAmberBorder,
+                _ => (Brush)FindResource("SecondaryTextBrush")
+            }
+        });
+        chrome.Child = titleRow;
+        panel.Children.Add(chrome);
+
+        if (!source.Unavailable)
+        {
+            var useAll = new Button
+            {
+                Content = "Use all fields",
+                FontSize = 12,
+                Padding = new Thickness(8, 4, 8, 4),
+                Style = (Style)FindResource("SecondaryButton"),
+                Tag = source.Id,
+                ToolTip = "Select every field from this source (then Apply)",
+                HorizontalAlignment = HorizontalAlignment.Left
+            };
+            AutomationProperties.SetName(useAll, $"Use all fields from {source.DisplayName}");
+            useAll.Click += UseAllFromSource_Click;
+            panel.Children.Add(useAll);
+
+            if (!source.IsVault)
+            {
+                var unlink = new Button
+                {
+                    Content = "Unlink…",
+                    FontSize = 12,
+                    Padding = new Thickness(8, 4, 8, 4),
+                    Margin = new Thickness(0, 4, 0, 0),
+                    Style = (Style)FindResource("TextActionButton"),
+                    Tag = source.Id,
+                    HorizontalAlignment = HorizontalAlignment.Left,
+                    ToolTip = "Not the same entry — remove this provider link"
+                };
+                unlink.Click += (_, _) =>
+                {
+                    _unlinkProviderId = source.Id;
+                    UnlinkSelected_Click(unlink, new RoutedEventArgs());
+                };
+                panel.Children.Add(unlink);
+            }
         }
 
         return panel;
@@ -216,9 +357,30 @@ public partial class DiffMatchWindow : Window
     private Border BuildFieldCell(string field, DiffSource source)
     {
         var display = FormatField(field, source, maskPassword: !_showPasswords);
-        var isUrl = field == "URL" && LooksLikeUrl(source.Url);
+        var infoOnly = IsInfoField(field);
+        var isUrl = !infoOnly && field == "URL" && LooksLikeUrl(source.Url);
+        var isPassword = !infoOnly && field == "Password" && !string.IsNullOrEmpty(source.Password) && !source.Unavailable;
         var panel = new DockPanel { LastChildFill = true };
-        if (isUrl && !source.Unavailable)
+
+        if (isPassword)
+        {
+            var reveal = new Button
+            {
+                Content = _showPasswords ? "Hide" : "Show",
+                MinWidth = 44,
+                Margin = new Thickness(6, 0, 0, 0),
+                Padding = new Thickness(6, 2, 6, 2),
+                FontSize = 12,
+                Style = (Style)FindResource("SecondaryButton"),
+                ToolTip = _showPasswords ? "Hide passwords" : "Show passwords",
+                Tag = "reveal"
+            };
+            AutomationProperties.SetName(reveal, _showPasswords ? "Hide passwords" : "Show passwords");
+            DockPanel.SetDock(reveal, Dock.Right);
+            reveal.Click += RevealPasswords_Click;
+            panel.Children.Add(reveal);
+        }
+        else if (isUrl && !source.Unavailable)
         {
             var launch = new Button
             {
@@ -249,107 +411,367 @@ public partial class DiffMatchWindow : Window
             Padding = new Thickness(10, 8, 10, 8),
             Margin = new Thickness(0, 0, 8, 8),
             CornerRadius = new CornerRadius(10),
-            Background = (Brush)FindResource("SecondaryBackgroundBrush"),
-            BorderBrush = (Brush)FindResource("BorderBrushColor"),
-            BorderThickness = new Thickness(1),
-            Cursor = source.Unavailable ? Cursors.Arrow : Cursors.Hand,
+            Cursor = infoOnly || source.Unavailable ? Cursors.Arrow : Cursors.Hand,
             Tag = (field, source.Id),
             MinHeight = 36,
-            Opacity = source.Unavailable ? 0.55 : 1
+            Opacity = source.Unavailable ? 0.55 : 1,
+            ToolTip = infoOnly
+                ? "Informational only — not used for match or Apply"
+                : source.Unavailable
+                    ? "Reconnect provider to compare"
+                    : source.IsVault && IsEditableVaultField(field)
+                        ? "Click to select · Slow second click to edit"
+                        : "Click to use this value for Apply"
         };
-        if (!source.Unavailable)
+        if (!infoOnly && !source.Unavailable)
             border.MouseLeftButtonUp += FieldCell_Click;
         return border;
     }
 
     private void FieldCell_Click(object sender, MouseButtonEventArgs e)
     {
-        if (sender is not Border { Tag: ValueTuple<string, string> tag })
+        if (_isEditing)
+            return;
+        if (sender is not Border { Tag: ValueTuple<string, string> tag } border)
             return;
         var (field, sourceId) = tag;
+        if (IsInfoField(field))
+            return;
+
+        var alreadySelected = string.Equals(
+            _fieldSource.GetValueOrDefault(field),
+            sourceId,
+            StringComparison.OrdinalIgnoreCase);
+        var isVault = string.Equals(sourceId, VaultSourceId, StringComparison.OrdinalIgnoreCase);
+        var now = DateTime.UtcNow;
+        var slowSecondClick =
+            alreadySelected &&
+            isVault &&
+            IsEditableVaultField(field) &&
+            _lastSelectKey == (field, sourceId) &&
+            e.ClickCount == 1 &&
+            now - _lastSelectUtc >= RenameClickDelay;
+
+        if (slowSecondClick)
+        {
+            var source = _sources.First(s => string.Equals(s.Id, sourceId, StringComparison.OrdinalIgnoreCase));
+            BeginInlineEdit(border, field, source);
+            e.Handled = true;
+            return;
+        }
+
         _correctSourceId = null;
-        ClearCorrectCheckboxes();
         _fieldSource[field] = sourceId;
+        _lastSelectKey = (field, sourceId);
+        _lastSelectUtc = now;
         HighlightSelections();
         e.Handled = true;
     }
 
-    private void CorrectSource_Checked(object sender, RoutedEventArgs e)
+    private void BeginInlineEdit(Border border, string field, DiffSource source)
     {
-        if (sender is not CheckBox { Tag: string sourceId })
+        if (!source.IsVault || !IsEditableVaultField(field) || source.Unavailable)
+            return;
+
+        _isEditing = true;
+        _editField = field;
+        _editBorder = border;
+        _editSource = source;
+        _editOriginal = GetEditableRaw(field, source);
+
+        FrameworkElement editor;
+        if (field == "Favorite")
+        {
+            var check = new CheckBox
+            {
+                Content = "Favorite",
+                IsChecked = source.IsFavorite,
+                VerticalAlignment = VerticalAlignment.Center,
+                Margin = new Thickness(2, 0, 2, 0)
+            };
+            check.KeyDown += InlineEditor_KeyDown;
+            check.LostKeyboardFocus += InlineEditor_LostFocus;
+            editor = check;
+        }
+        else
+        {
+            var box = new TextBox
+            {
+                Text = _editOriginal ?? "",
+                TextWrapping = field is "Notes" or "URL" ? TextWrapping.Wrap : TextWrapping.NoWrap,
+                AcceptsReturn = field == "Notes",
+                MinHeight = field == "Notes" ? 64 : 28,
+                VerticalContentAlignment = VerticalAlignment.Center,
+                Padding = new Thickness(4, 2, 4, 2)
+            };
+            if (TryFindResource("DialogInput") is Style inputStyle)
+                box.Style = inputStyle;
+            box.KeyDown += InlineEditor_KeyDown;
+            box.LostKeyboardFocus += InlineEditor_LostFocus;
+            editor = box;
+        }
+
+        border.Child = editor;
+        border.Cursor = Cursors.IBeam;
+        border.ToolTip = "Enter to save · Esc to cancel";
+        Dispatcher.BeginInvoke(() =>
+        {
+            editor.Focus();
+            if (editor is TextBox tb)
+                tb.SelectAll();
+            Keyboard.Focus(editor);
+        }, System.Windows.Threading.DispatcherPriority.Input);
+    }
+
+    private void InlineEditor_KeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key == Key.Escape)
+        {
+            EndInlineEdit(commit: false);
+            e.Handled = true;
+        }
+        else if (e.Key == Key.Enter && sender is not TextBox { AcceptsReturn: true })
+        {
+            EndInlineEdit(commit: true);
+            e.Handled = true;
+        }
+    }
+
+    private void InlineEditor_LostFocus(object sender, KeyboardFocusChangedEventArgs e)
+    {
+        if (!_isEditing || _endingEdit)
+            return;
+        EndInlineEdit(commit: true);
+    }
+
+    private void EndInlineEdit(bool commit)
+    {
+        if (!_isEditing || _endingEdit || _editField is null || _editSource is null || _editBorder is null)
+            return;
+
+        _endingEdit = true;
+        try
+        {
+            var field = _editField;
+            var source = _editSource;
+            var border = _editBorder;
+
+            if (border.Child is UIElement editor)
+            {
+                editor.LostKeyboardFocus -= InlineEditor_LostFocus;
+                editor.KeyDown -= InlineEditor_KeyDown;
+            }
+
+            if (commit)
+            {
+                if (border.Child is CheckBox check)
+                    source.IsFavorite = check.IsChecked == true;
+                else if (border.Child is TextBox box)
+                    ApplyEditableRaw(source, field, box.Text);
+            }
+            else
+            {
+                ApplyEditableRaw(source, field, _editOriginal);
+            }
+
+            _isEditing = false;
+            _editField = null;
+            _editOriginal = null;
+            _editBorder = null;
+            _editSource = null;
+            _fieldSource[field] = VaultSourceId;
+            _lastSelectKey = (field, VaultSourceId);
+            _lastSelectUtc = DateTime.UtcNow;
+
+            // Rebuild so match colors / display (masked password) refresh from edited vault values.
+            RebuildMatrixPreservingSelection();
+        }
+        finally
+        {
+            _endingEdit = false;
+        }
+    }
+
+    private static string? GetEditableRaw(string field, DiffSource source) => field switch
+    {
+        "Title" => source.Title,
+        "Username" => source.Username,
+        "Password" => source.Password,
+        "URL" => source.Url,
+        "Notes" => source.Notes,
+        "Favorite" => source.IsFavorite.ToString(),
+        "TOTP" => source.Totp,
+        _ => null
+    };
+
+    private static void ApplyEditableRaw(DiffSource source, string field, string? value)
+    {
+        var trimmed = value?.Trim() ?? "";
+        switch (field)
+        {
+            case "Title":
+                source.Title = trimmed;
+                break;
+            case "Username":
+                source.Username = string.IsNullOrEmpty(trimmed) ? null : trimmed;
+                break;
+            case "Password":
+                source.Password = value; // preserve intentional spaces
+                break;
+            case "URL":
+                source.Url = string.IsNullOrEmpty(trimmed) ? null : trimmed;
+                break;
+            case "Notes":
+                source.Notes = string.IsNullOrEmpty(value) ? null : value;
+                break;
+            case "Favorite":
+                source.IsFavorite = bool.TryParse(trimmed, out var fav) && fav;
+                break;
+            case "TOTP":
+                source.Totp = string.IsNullOrEmpty(trimmed) ? null : trimmed;
+                break;
+        }
+    }
+
+    private void UseAllFromSource_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not Button { Tag: string sourceId })
             return;
         _correctSourceId = sourceId;
-        foreach (var child in MatrixHost.Children.OfType<StackPanel>())
-        {
-            foreach (var cb in child.Children.OfType<CheckBox>())
-            {
-                if (!ReferenceEquals(cb, sender) && cb.IsChecked == true)
-                    cb.IsChecked = false;
-            }
-        }
-
-        foreach (var field in FieldKeys)
+        _unlinkProviderId = string.Equals(sourceId, VaultSourceId, StringComparison.OrdinalIgnoreCase)
+            ? null
+            : sourceId;
+        foreach (var field in FieldKeys.Where(f => !IsInfoField(f)))
             _fieldSource[field] = sourceId;
         HighlightSelections();
-    }
-
-    private void CorrectSource_Unchecked(object sender, RoutedEventArgs e)
-    {
-        if (sender is not CheckBox { Tag: string sourceId })
-            return;
-        if (string.Equals(_correctSourceId, sourceId, StringComparison.OrdinalIgnoreCase))
-            _correctSourceId = null;
-    }
-
-    private void ClearCorrectCheckboxes()
-    {
-        foreach (var child in MatrixHost.Children.OfType<StackPanel>())
-        {
-            foreach (var cb in child.Children.OfType<CheckBox>())
-            {
-                if (cb.IsChecked == true)
-                    cb.IsChecked = false;
-            }
-        }
     }
 
     private void HighlightSelections()
     {
         var brand = (Brush)FindResource("BrandBlueBrush");
-        var border = (Brush)FindResource("BorderBrushColor");
+        var neutralBg = (Brush)FindResource("SecondaryBackgroundBrush");
+        var neutralBorder = (Brush)FindResource("BorderBrushColor");
+        var vault = _sources.First(s => s.IsVault);
+
         foreach (var ((field, sourceId), cell) in _cells)
         {
-            var selected = string.Equals(_fieldSource.GetValueOrDefault(field), sourceId, StringComparison.OrdinalIgnoreCase);
-            cell.BorderBrush = selected ? brand : border;
-            cell.BorderThickness = new Thickness(selected ? 2 : 1);
+            var source = _sources.First(s => string.Equals(s.Id, sourceId, StringComparison.OrdinalIgnoreCase));
+            var selected = !IsInfoField(field) &&
+                           string.Equals(_fieldSource.GetValueOrDefault(field), sourceId, StringComparison.OrdinalIgnoreCase);
+            var matchesVault = !IsInfoField(field) &&
+                               (source.IsVault || FieldEquals(field, source, vault));
+            var rowDiffers = !IsInfoField(field) && FieldRowDiffers(field);
+
+            if (IsInfoField(field))
+            {
+                // Timestamps are informational only — no match/selection chrome.
+                cell.Background = neutralBg;
+                cell.BorderBrush = neutralBorder;
+                cell.BorderThickness = new Thickness(1);
+                continue;
+            }
+
+            if (source.IsVault)
+            {
+                cell.Background = neutralBg;
+                cell.BorderBrush = selected ? brand : neutralBorder;
+            }
+            else if (matchesVault)
+            {
+                cell.Background = MatchGreenFill;
+                cell.BorderBrush = selected ? brand : MatchGreenBorder;
+            }
+            else
+            {
+                cell.Background = DiffAmberFill;
+                cell.BorderBrush = selected ? brand : DiffAmberBorder;
+            }
+
+            cell.BorderThickness = new Thickness(selected ? (rowDiffers ? 2.5 : 2) : 1);
+        }
+
+        foreach (var (field, label) in _fieldLabels)
+        {
+            var differs = !IsInfoField(field) && FieldRowDiffers(field);
+            label.Text = differs ? $"{field} ●" : field;
+            label.FontWeight = differs ? FontWeights.SemiBold : FontWeights.Normal;
+            label.Foreground = differs
+                ? DiffAmberBorder
+                : (Brush)FindResource("SecondaryTextBrush");
         }
     }
 
-    private void ShowPasswords_Changed(object sender, RoutedEventArgs e)
+    private bool FieldRowDiffers(string field)
     {
-        _showPasswords = ShowPasswordsCheck.IsChecked == true;
-        BuildMatrix();
-        // Restore selection highlights / correct checkbox
-        if (_correctSourceId is not null)
-        {
-            foreach (var child in MatrixHost.Children.OfType<StackPanel>())
-            {
-                foreach (var cb in child.Children.OfType<CheckBox>())
-                {
-                    if (cb.Tag is string id &&
-                        string.Equals(id, _correctSourceId, StringComparison.OrdinalIgnoreCase))
-                        cb.IsChecked = true;
-                }
-            }
-        }
+        if (IsInfoField(field))
+            return false;
+        var vault = _sources.First(s => s.IsVault);
+        return _sources.Any(s =>
+            !s.IsVault && !s.Unavailable && !FieldEquals(field, s, vault));
+    }
 
+    private SourceMatchState GetSourceMatchState(DiffSource source)
+    {
+        if (source.IsVault)
+            return SourceMatchState.Vault;
+        if (source.Unavailable)
+            return SourceMatchState.Unavailable;
+
+        var vault = _sources.First(s => s.IsVault);
+        var anyDiff = FieldKeys
+            .Where(f => !IsInfoField(f))
+            .Any(f => !FieldEquals(f, source, vault));
+        return anyDiff ? SourceMatchState.Differs : SourceMatchState.MatchesVault;
+    }
+
+    private static bool FieldEquals(string field, DiffSource a, DiffSource b)
+    {
+        var leftText = NormalizeCompare(field, GetRaw(field, a));
+        var rightText = NormalizeCompare(field, GetRaw(field, b));
+        return string.Equals(leftText, rightText, StringComparison.Ordinal);
+    }
+
+    private static string NormalizeCompare(string field, string? value)
+    {
+        var raw = (value ?? "").Trim();
+        if (field is "Favorite")
+            return bool.TryParse(raw, out var b) && b ? "true" : "false";
+        if (field is "Username" or "Title" or "Host" or "URL")
+            return raw.ToLowerInvariant();
+        return raw;
+    }
+
+    private void RevealPasswords_Click(object sender, RoutedEventArgs e)
+    {
+        if (_isEditing)
+            EndInlineEdit(commit: true);
+        _showPasswords = !_showPasswords;
+        RebuildMatrixPreservingSelection();
+        e.Handled = true;
+    }
+
+    private void RebuildMatrixPreservingSelection()
+    {
+        if (_isEditing)
+            EndInlineEdit(commit: true);
+
+        var snapshot = _fieldSource.ToDictionary(kv => kv.Key, kv => kv.Value, StringComparer.OrdinalIgnoreCase);
+        var correct = _correctSourceId;
+        var lastKey = _lastSelectKey;
+        var lastUtc = _lastSelectUtc;
+        BuildMatrix();
+        foreach (var (field, sourceId) in snapshot)
+            _fieldSource[field] = sourceId;
+        _correctSourceId = correct;
+        _lastSelectKey = lastKey;
+        _lastSelectUtc = lastUtc;
         HighlightSelections();
     }
 
     private void SoftFill_Click(object sender, RoutedEventArgs e)
     {
         var vault = _sources.First(s => s.IsVault);
-        foreach (var field in FieldKeys)
+        foreach (var field in FieldKeys.Where(f => !IsInfoField(f)))
         {
             if (!string.IsNullOrWhiteSpace(GetRaw(field, vault)))
             {
@@ -357,22 +779,21 @@ public partial class DiffMatchWindow : Window
                 continue;
             }
 
-            var donor = _sources.FirstOrDefault(s => !s.IsVault && !s.Unavailable && !string.IsNullOrWhiteSpace(GetRaw(field, s)));
+            var donor = _sources.FirstOrDefault(s =>
+                !s.IsVault && !s.Unavailable && !string.IsNullOrWhiteSpace(GetRaw(field, s)));
             _fieldSource[field] = donor?.Id ?? VaultSourceId;
         }
 
         _correctSourceId = null;
-        ClearCorrectCheckboxes();
         HighlightSelections();
     }
 
     private async void UnlinkSelected_Click(object sender, RoutedEventArgs e)
     {
-        var providerId = _correctSourceId;
+        var providerId = _unlinkProviderId ?? _correctSourceId;
         if (string.IsNullOrWhiteSpace(providerId) ||
             string.Equals(providerId, VaultSourceId, StringComparison.OrdinalIgnoreCase))
         {
-            // Fall back to first mismatched provider field selection
             providerId = _sources.FirstOrDefault(s => !s.IsVault && s.IsMismatch)?.Id
                          ?? _sources.FirstOrDefault(s => !s.IsVault)?.Id;
         }
@@ -380,7 +801,7 @@ public partial class DiffMatchWindow : Window
         if (string.IsNullOrWhiteSpace(providerId) ||
             string.Equals(providerId, VaultSourceId, StringComparison.OrdinalIgnoreCase))
         {
-            AppDialog.Alert(this, "Select a provider column (This is correct) to unlink.", "Unlink");
+            AppDialog.Alert(this, "Use Unlink under a provider column.", "Unlink");
             return;
         }
 
@@ -406,27 +827,36 @@ public partial class DiffMatchWindow : Window
 
     private async void Apply_Click(object sender, RoutedEventArgs e)
     {
+        var push = AppDialog.Confirm(
+            this,
+            "Apply selections to the vault?\n\nChoose Update all to also push the vault values to linked providers.",
+            "Apply to vault",
+            confirmText: "Update all",
+            cancelText: "Vault only");
+
         try
         {
+            // Snapshot DB state before mutate (inline Diff edits live on DiffSource until Apply).
+            var beforeItem = await _vaultItems.GetByIdAsync(_item.Id) ?? _item;
+            var before = ReconcileHistoryService.CaptureSnapshot(beforeItem);
+
             ApplySelectionsToItem(_item);
             await _vaultItems.SaveAsync(_item);
             await _import.ClearMismatchesForItemAsync(_item.Id);
 
-            var push = AppDialog.Confirm(
-                this,
-                "Vault updated from your selections.\n\nUpdate all linked sources to match the vault?",
-                "Update linked sources",
-                confirmText: "Update all",
-                cancelText: "Vault only");
-
             if (push)
-            {
-                var result = await _import.PushToLinkedProvidersAsync(_item);
-                var detail = $"Updated {result.Updated}, skipped {result.Skipped}, failed {result.Failed}.";
-                if (result.Messages.Count > 0)
-                    detail += "\n" + string.Join("\n", result.Messages.Take(6));
-                AppDialog.Alert(this, detail, "Push to providers");
-            }
+                await _import.PushToLinkedProvidersAsync(_item);
+
+            var providerIds = _sources
+                .Where(s => !s.IsVault)
+                .Select(s => s.Id)
+                .ToList();
+            await _history.RecordApplyAsync(
+                _item.Id,
+                before,
+                new Dictionary<string, string>(_fieldSource, StringComparer.OrdinalIgnoreCase),
+                pushedToProviders: push,
+                providerIds);
 
             DialogResult = true;
             Close();
@@ -434,6 +864,16 @@ public partial class DiffMatchWindow : Window
         catch (Exception ex)
         {
             AppDialog.Alert(this, ex.Message, "Apply", AppDialogKind.Warning);
+        }
+    }
+
+    private void History_Click(object sender, RoutedEventArgs e)
+    {
+        var win = new ReconcileHistoryWindow(_item.Id, _item.Title) { Owner = this };
+        if (win.ShowDialog() == true)
+        {
+            DialogResult = true;
+            Close();
         }
     }
 
@@ -448,9 +888,9 @@ public partial class DiffMatchWindow : Window
         if (bool.TryParse(fav, out var f))
             item.IsFavorite = f;
         var totp = Pick("TOTP");
-        // Don't write masked bullets into TOTP
         if (totp is not null && totp != "••••")
             item.TotpSecret = string.IsNullOrWhiteSpace(totp) ? item.TotpSecret : totp;
+        // Created/Updated are informational only — vault keeps its own timestamps on Save.
     }
 
     private string? Pick(string field)
@@ -464,6 +904,8 @@ public partial class DiffMatchWindow : Window
     private static string? GetRaw(string field, DiffSource source) => field switch
     {
         "Title" => source.Title,
+        "Created" => FormatTimestamp(source.CreatedAt),
+        "Updated" => FormatTimestamp(source.ModifiedAt),
         "Username" => source.Username,
         "Password" => source.Password,
         "URL" => source.Url,
@@ -473,6 +915,16 @@ public partial class DiffMatchWindow : Window
         "TOTP" => source.Totp,
         _ => null
     };
+
+    private static string? FormatTimestamp(DateTime? utc)
+    {
+        if (utc is null || utc == default)
+            return null;
+        var local = utc.Value.Kind == DateTimeKind.Local
+            ? utc.Value
+            : DateTime.SpecifyKind(utc.Value, DateTimeKind.Utc).ToLocalTime();
+        return local.ToString("yyyy-MM-dd HH:mm");
+    }
 
     private static string FormatField(string field, DiffSource source, bool maskPassword)
     {
@@ -488,6 +940,9 @@ public partial class DiffMatchWindow : Window
 
         if (field == "TOTP")
             return string.IsNullOrEmpty(raw) ? "" : (maskPassword ? "••••" : raw);
+
+        if (field is "Created" or "Updated")
+            return string.IsNullOrEmpty(raw) ? "—" : raw;
 
         return raw ?? "";
     }
@@ -520,6 +975,14 @@ public partial class DiffMatchWindow : Window
 
     private void Close_Click(object sender, RoutedEventArgs e) => Close();
 
+    private enum SourceMatchState
+    {
+        Vault,
+        MatchesVault,
+        Differs,
+        Unavailable
+    }
+
     private sealed class DiffSource
     {
         public string Id { get; init; } = "";
@@ -527,12 +990,14 @@ public partial class DiffMatchWindow : Window
         public bool IsVault { get; init; }
         public bool IsMismatch { get; init; }
         public bool Unavailable { get; init; }
-        public string? Title { get; init; }
-        public string? Username { get; init; }
-        public string? Password { get; init; }
-        public string? Url { get; init; }
-        public string? Notes { get; init; }
-        public bool IsFavorite { get; init; }
-        public string? Totp { get; init; }
+        public string? Title { get; set; }
+        public string? Username { get; set; }
+        public string? Password { get; set; }
+        public string? Url { get; set; }
+        public string? Notes { get; set; }
+        public bool IsFavorite { get; set; }
+        public string? Totp { get; set; }
+        public DateTime? CreatedAt { get; init; }
+        public DateTime? ModifiedAt { get; init; }
     }
 }

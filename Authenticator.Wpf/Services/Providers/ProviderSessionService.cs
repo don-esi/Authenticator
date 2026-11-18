@@ -293,7 +293,9 @@ public sealed class ProviderSessionService
             Path = e.Path,
             IsFavorite = e.IsFavorite,
             ItemType = e.ItemType,
-            Fields = new Dictionary<string, string>(e.Fields)
+            Fields = new Dictionary<string, string>(e.Fields),
+            CreatedAt = e.CreatedAt,
+            ModifiedAt = e.ModifiedAt
         };
 
     public async Task ReconnectAllAsync(CancellationToken ct = default)

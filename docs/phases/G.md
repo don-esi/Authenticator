@@ -58,20 +58,22 @@ WealthForge may mirror the same `connection.json` shape and probe protocol.
 - Interactive MFA UI for remaining cloud providers (Bitwarden/Dashlane/etc. still JSON façade; LastPass Connect/Import prompts OTP/YubiKey like WealthForge)
 - Always-on discovery helper when Host app is closed
 - Unify 2FA Folders with VaultFolders
-- Optional Diff auto-fill into browser after Open site (currently copy-password helpers)
+- **Next cycle — Diff try-selection:** from Diff, auto-test the current field selection (open site URL in browser → auto-login/fill attempt) so the user can see whether that password/source worked before Apply
 
 ## Reconcile / consolidate (G6+)
 
 Vault is the consolidation hub across providers (not a third silo of duplicates).
 
 - **Identity** = normalized **username + host** (strip `www.`; ignore path/query; **include non-default port** so `host:5000` ≠ `host:8123`). Username+host only consolidates when **titles are compatible** (equal / substring / one empty) — e.g. Media vs HomeAssistant on the same host must not merge. Fallback: title+username when host/username missing.
+- **Same-provider origins never collapse**: if a vault row already has an `ExternalLink` for that provider, a different origin id creates a new vault row (avoids overwriting ExternalId + false Diff conflicts on clean import).
 - **Soft-merge** is primary: fill empty vault fields from provider; keep vault when both sides have non-empty non-password values.
 - **Password conflict** only when both sides have non-empty differing passwords (compare after decrypt) → mismatch badge → Diff. Matching/empty passwords → aligned (no Diff).
 - Clean slate + **one** linked provider: skip auto conflict scan (vault came from that store). Diff/reconcile still available for edge cases. Auto-scan when **two or more** providers have links.
 - Do **not** use full content-hash equality for aligned vs conflict (provider formatting noise).
-- **Multi-source Diff**: columns = Vault + every linked provider. Large **This is correct** checkbox picks a whole source; click a field cell to merge per-field. **Apply to vault** then confirm **Update all linked sources** (push write-back). Unlink for false matches.
-- **Developer purge**: hard-deletes Shared vault items/links (verified remaining=0, SQL fallback); clears Conflicts UI; does not remove Connect credentials.
-- **Unlock**: provider `ReconnectAll` runs in the background after Codes UI is shown (does not block YubiKey/PIN unlock).
+- **Multi-source Diff**: columns = Vault + every linked provider. Shows **Created/Updated** as info-only (not match/selection indicators; KeePass times; LastPass `created_gmt` / `last_pwchange_gmt`/`last_modified_gmt`). **Per-field click** picks that value (primary). **Slow second click** on a selected Vault field (Explorer-style rename) inline-edits that value before Apply. Green = matches vault; amber = differs; blue ring = selected for Apply. Window sizes to content within the work area. **Use all fields** is optional whole-source. **Apply to vault** then confirm **Update all linked sources**. Unlink under each provider column.
+- **Reconcile history + undo**: `ReconcileHistory` table stores sealed pre-Apply vault snapshots (keep 20/item). Diff **History…** lists per-item applies; Vault Providers **Reconcile history…** is the global recovery list. Undo defaults to vault restore; **Update all** also pushes restored values to linked providers.
+- **Developer purge**: hard-deletes Shared vault items/links/history (verified remaining=0, SQL fallback); clears Conflicts UI; does not remove Connect credentials.
+- **Unlock**: provider `ReconnectAll` runs on a worker thread after Codes UI is shown (banner while KeePass/LastPass reconnect; does not block YubiKey/PIN unlock or freeze UI).
 
 ## Provider connect vs import (G5+)
 

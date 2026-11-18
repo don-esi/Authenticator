@@ -271,6 +271,7 @@ public sealed class VaultItemService
             await using var db = new AuthenticatorDbContext();
             linksDeleted = await db.ExternalLinks.CountAsync(ct);
             itemsDeleted = await db.VaultItems.CountAsync(ct);
+            await db.ReconcileHistory.ExecuteDeleteAsync(ct);
             await db.ExternalLinks.ExecuteDeleteAsync(ct);
             await db.VaultCustomFields.ExecuteDeleteAsync(ct);
             await db.VaultItems.ExecuteDeleteAsync(ct);
@@ -284,7 +285,7 @@ public sealed class VaultItemService
                     $"EF purge left remaining items={remainingItems}, links={remainingLinks}; trying raw SQL.",
                     nameof(VaultItemService));
                 await db.Database.ExecuteSqlRawAsync(
-                    "DELETE FROM ExternalLinks; DELETE FROM VaultCustomFields; DELETE FROM VaultItems; DELETE FROM OfflineChangeQueue;",
+                    "DELETE FROM ReconcileHistory; DELETE FROM ExternalLinks; DELETE FROM VaultCustomFields; DELETE FROM VaultItems; DELETE FROM OfflineChangeQueue;",
                     ct);
                 remainingLinks = await db.ExternalLinks.CountAsync(ct);
                 remainingItems = await db.VaultItems.CountAsync(ct);
@@ -300,6 +301,7 @@ public sealed class VaultItemService
                 itemsDeleted = await offline.VaultItems.CountAsync(ct);
             }
 
+            await offline.ReconcileHistory.ExecuteDeleteAsync(ct);
             await offline.ExternalLinks.ExecuteDeleteAsync(ct);
             await offline.VaultCustomFields.ExecuteDeleteAsync(ct);
             await offline.VaultItems.ExecuteDeleteAsync(ct);

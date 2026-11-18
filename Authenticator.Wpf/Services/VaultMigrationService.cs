@@ -178,5 +178,25 @@ public sealed class VaultMigrationService
               );
             END
             """, ct);
+
+        await db.Database.ExecuteSqlRawAsync(
+            """
+            IF OBJECT_ID(N'dbo.ReconcileHistory', N'U') IS NULL
+            BEGIN
+              CREATE TABLE dbo.ReconcileHistory (
+                Id uniqueidentifier NOT NULL PRIMARY KEY,
+                ItemId uniqueidentifier NOT NULL,
+                CreatedAtUtc datetime2 NOT NULL,
+                Summary nvarchar(500) NULL,
+                BeforeJson nvarchar(max) NOT NULL,
+                FieldSourcesJson nvarchar(max) NULL,
+                PushedToProviders bit NOT NULL,
+                ProviderIds nvarchar(500) NULL,
+                UndoneAtUtc datetime2 NULL
+              );
+              CREATE INDEX IX_ReconcileHistory_ItemId ON dbo.ReconcileHistory (ItemId);
+              CREATE INDEX IX_ReconcileHistory_CreatedAtUtc ON dbo.ReconcileHistory (CreatedAtUtc);
+            END
+            """, ct);
     }
 }

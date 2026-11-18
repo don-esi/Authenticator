@@ -36,6 +36,35 @@ public sealed class OfflineVaultService
         await using var db = new OfflineVaultDbContext();
         await db.Database.EnsureCreatedAsync(ct);
         await EnsureLastUsedAtColumnAsync(db, ct);
+        await EnsureReconcileHistoryTableAsync(db, ct);
+    }
+
+    private static async Task EnsureReconcileHistoryTableAsync(OfflineVaultDbContext db, CancellationToken ct)
+    {
+        try
+        {
+            await db.Database.ExecuteSqlRawAsync(
+                """
+                CREATE TABLE IF NOT EXISTS ReconcileHistory (
+                  Id TEXT NOT NULL PRIMARY KEY,
+                  ItemId TEXT NOT NULL,
+                  CreatedAtUtc TEXT NOT NULL,
+                  Summary TEXT NULL,
+                  BeforeJson TEXT NOT NULL,
+                  FieldSourcesJson TEXT NULL,
+                  PushedToProviders INTEGER NOT NULL,
+                  ProviderIds TEXT NULL,
+                  UndoneAtUtc TEXT NULL
+                );
+                CREATE INDEX IF NOT EXISTS IX_ReconcileHistory_ItemId ON ReconcileHistory (ItemId);
+                CREATE INDEX IF NOT EXISTS IX_ReconcileHistory_CreatedAtUtc ON ReconcileHistory (CreatedAtUtc);
+                """,
+                ct);
+        }
+        catch (Exception ex)
+        {
+            LoggingConfiguration.LogException(ex, "Failed to ensure offline ReconcileHistory table.", nameof(OfflineVaultService));
+        }
     }
 
     private static async Task EnsureLastUsedAtColumnAsync(OfflineVaultDbContext db, CancellationToken ct)

@@ -71,6 +71,39 @@
 			</Grid>
 		</Border>
 
+		<!-- Non-blocking status while providers reconnect after unlock. -->
+		<Border
+			x:Name="ReconnectBanner"
+			Grid.Row="1"
+			Padding="12,8"
+			Background="{DynamicResource SecondaryBackgroundBrush}"
+			BorderBrush="{DynamicResource BorderBrushColor}"
+			BorderThickness="0,0,0,1"
+			Visibility="Collapsed">
+			<Grid>
+				<Grid.ColumnDefinitions>
+					<ColumnDefinition Width="Auto" />
+					<ColumnDefinition Width="*" />
+				</Grid.ColumnDefinitions>
+				<syncfusion:SfBusyIndicator
+					Width="28"
+					Height="28"
+					VerticalAlignment="Center"
+					AnimationType="Cupertino"
+					IsBusy="True"
+					ViewboxHeight="18"
+					ViewboxWidth="18" />
+				<TextBlock
+					x:Name="ReconnectBannerText"
+					Grid.Column="1"
+					Margin="10,0,0,0"
+					VerticalAlignment="Center"
+					Foreground="{DynamicResource SecondaryTextBrush}"
+					Text="Reconnecting password managers…"
+					TextWrapping="Wrap" />
+			</Grid>
+		</Border>
+
 		<Grid x:Name="PageHost" Grid.Row="2">
 			<local:CodesView x:Name="CodesPage" />
 			<local:BackupView x:Name="BackupPage" Visibility="Collapsed" />

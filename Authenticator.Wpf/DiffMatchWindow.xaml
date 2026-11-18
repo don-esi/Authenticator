@@ -4,10 +4,11 @@
 	Title="Reconcile"
 	Width="920"
 	Height="640"
-	MinWidth="720"
-	MinHeight="520"
+	MinWidth="640"
+	MinHeight="480"
 	WindowStartupLocation="CenterOwner"
 	ShowInTaskbar="False"
+	Loaded="Window_Loaded"
 	Background="{DynamicResource PageBackgroundBrush}"
 	Foreground="{DynamicResource PrimaryTextBrush}"
 	FontFamily="Segoe UI"
@@ -40,13 +41,6 @@
 		</Border>
 
 		<StackPanel Grid.Row="1" Orientation="Horizontal" Margin="16,10,16,0">
-			<CheckBox x:Name="ShowPasswordsCheck"
-				Content="Show passwords"
-				VerticalAlignment="Center"
-				Margin="0,0,16,0"
-				Checked="ShowPasswords_Changed"
-				Unchecked="ShowPasswords_Changed"
-				AutomationProperties.Name="Show passwords" />
 			<Button Content="Soft-fill empties"
 				Margin="0,0,8,0"
 				Style="{StaticResource SecondaryButton}"
@@ -55,7 +49,9 @@
 				AutomationProperties.Name="Soft-fill empties" />
 			<TextBlock VerticalAlignment="Center"
 				Foreground="{DynamicResource SecondaryTextBrush}"
-				Text="Pick This is correct on a column, or click a field cell to choose that source." />
+				TextWrapping="Wrap"
+				MaxWidth="720"
+				Text="Green = matches vault · Amber = differs · Click to pick · Slow second click on Vault to edit · Created/Updated info only" />
 		</StackPanel>
 
 		<ScrollViewer Grid.Row="2"
@@ -69,13 +65,16 @@
 
 		<Border Grid.Row="3" Style="{StaticResource DialogFooter}">
 			<Grid>
-				<StackPanel Orientation="Horizontal" HorizontalAlignment="Left">
-					<Button x:Name="UnlinkSelectedButton"
-						Content="Unlink selected provider"
+				<StackPanel Orientation="Horizontal" HorizontalAlignment="Left" VerticalAlignment="Center">
+					<Button Content="History…"
+						Margin="0,0,8,0"
 						Style="{StaticResource SecondaryButton}"
-						Click="UnlinkSelected_Click"
-						ToolTip="Remove the selected provider link (not the same entry)"
-						AutomationProperties.Name="Unlink selected provider" />
+						Click="History_Click"
+						ToolTip="Reconcile history and undo for this item"
+						AutomationProperties.Name="Reconcile history" />
+					<TextBlock VerticalAlignment="Center"
+						Foreground="{DynamicResource SecondaryTextBrush}"
+						Text="Unlink is under each provider column." />
 				</StackPanel>
 				<StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
 					<Button Content="Apply to vault…"

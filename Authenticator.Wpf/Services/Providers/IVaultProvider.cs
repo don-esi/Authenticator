@@ -24,6 +24,10 @@ public sealed class ProviderEntry
     public bool IsFavorite { get; set; }
     public VaultItemType ItemType { get; set; } = VaultItemType.Login;
     public Dictionary<string, string> Fields { get; set; } = new();
+    /// <summary>Origin store created time (UTC) when the provider exposes it.</summary>
+    public DateTime? CreatedAt { get; set; }
+    /// <summary>Origin store last-modified time (UTC) when the provider exposes it.</summary>
+    public DateTime? ModifiedAt { get; set; }
 }
 
 public sealed class ProviderConnectRequest

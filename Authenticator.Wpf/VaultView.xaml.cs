@@ -984,6 +984,13 @@ public partial class VaultView : UserControl
             await ReloadAsync();
     }
 
+    private void OpenReconcileHistory()
+    {
+        var win = new ReconcileHistoryWindow { Owner = Window.GetWindow(this) };
+        if (win.ShowDialog() == true)
+            _ = ReloadAsync();
+    }
+
     private static MenuItem MakeMenu(string header, Action action)
     {
         var item = new MenuItem { Header = header };
@@ -1239,6 +1246,7 @@ public partial class VaultView : UserControl
         var menu = new ContextMenu { PlacementTarget = placementTarget, Placement = PlacementMode.Top };
         menu.Items.Add(MakeMenu("Connect to…", () => _ = ConnectToProviderAsync()));
         menu.Items.Add(MakeMenu("Import from…", () => _ = ImportFromProviderAsync()));
+        menu.Items.Add(MakeMenu("Reconcile history…", () => OpenReconcileHistory()));
 
         var conflictCount = _allRowsView.Count(r => r.HasMismatch);
         if (conflictCount > 0)

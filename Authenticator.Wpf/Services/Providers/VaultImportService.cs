@@ -60,7 +60,9 @@ public sealed class VaultImportService
             if (TryFindIdentity(indexes, entry, out var vaultId))
             {
                 var existing = await _items.GetByIdAsync(vaultId, ct);
-                if (existing is not null)
+                // Same provider already linked under another origin = distinct store rows; don't collapse
+                // (that overwrote ExternalId and false-flagged password conflicts on clean imports).
+                if (existing is not null && !HasProviderLink(existing, provider.ProviderId))
                 {
                     var mismatch = SoftMerge(existing, entry, provider.Capabilities.SupportsFavorites);
                     existing.IsDeleted = false;
@@ -124,7 +126,8 @@ public sealed class VaultImportService
             if (TryFindIdentity(indexes, entry, out var vaultId))
             {
                 var existing = await _items.GetByIdAsync(vaultId, ct);
-                if (existing is not null)
+                // Same provider already linked under another origin = distinct store rows; don't collapse.
+                if (existing is not null && !HasProviderLink(existing, provider.ProviderId))
                 {
                     var mismatch = SoftMerge(existing, entry, provider.Capabilities.SupportsFavorites);
                     existing.IsDeleted = false;
@@ -213,6 +216,14 @@ public sealed class VaultImportService
         if (syncFavorites)
             item.IsFavorite = entry.IsFavorite;
     }
+
+    /// <summary>
+    /// True when this vault row already has an origin link for <paramref name="providerId"/>.
+    /// Same-store duplicates must stay as separate vault rows (one ExternalLink per provider).
+    /// </summary>
+    private static bool HasProviderLink(VaultItem item, string providerId) =>
+        item.ExternalLinks?.Any(l =>
+            string.Equals(l.Provider, providerId, StringComparison.OrdinalIgnoreCase)) == true;
 
     /// <summary>
     /// Soft-merge provider into vault. Returns true when both sides have non-empty differing passwords (Diff needed).

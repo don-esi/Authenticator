@@ -1116,15 +1116,44 @@ public partial class MainWindow : Window
 
     private async Task ReconnectProvidersInBackgroundAsync()
     {
+        if (ProviderSessionService.Instance.SavedConnections.Count == 0)
+            return;
+
+        SetReconnectBanner(true, "Reconnecting password managers…");
         try
         {
-            await ProviderSessionService.Instance.ReconnectAllAsync();
+            // KeePass open + LastPass fetch are CPU/IO heavy and were freezing the UI for seconds
+            // after unlock when awaited on the dispatcher thread.
+            await Task.Run(async () =>
+                    await ProviderSessionService.Instance.ReconnectAllAsync().ConfigureAwait(false))
+                .ConfigureAwait(true);
             LoggingConfiguration.LogInfo("Background provider reconnect finished.", nameof(MainWindow));
+            SetReconnectBanner(true, "Password managers ready");
+            await Task.Delay(1200);
         }
         catch (Exception ex)
         {
             LoggingConfiguration.LogException(ex, "Background provider reconnect failed.", nameof(MainWindow));
+            SetReconnectBanner(true, "Provider reconnect failed — see Providers menu");
+            await Task.Delay(2500);
         }
+        finally
+        {
+            SetReconnectBanner(false);
+        }
+    }
+
+    private void SetReconnectBanner(bool visible, string? message = null)
+    {
+        if (!Dispatcher.CheckAccess())
+        {
+            Dispatcher.Invoke(() => SetReconnectBanner(visible, message));
+            return;
+        }
+
+        if (message is not null)
+            ReconnectBannerText.Text = message;
+        ReconnectBanner.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
     }
 
     private void CodesNav_Click(object sender, RoutedEventArgs e) => ShowPage(CodesPage);

@@ -63,7 +63,9 @@ internal abstract class MemoryVaultProvider : IVaultProvider
             Path = string.IsNullOrWhiteSpace(entry.Path) ? previous.Path : entry.Path,
             IsFavorite = entry.IsFavorite,
             ItemType = entry.ItemType == default ? previous.ItemType : entry.ItemType,
-            Fields = entry.Fields.Count > 0 ? entry.Fields : previous.Fields
+            Fields = entry.Fields.Count > 0 ? entry.Fields : previous.Fields,
+            CreatedAt = entry.CreatedAt ?? previous.CreatedAt,
+            ModifiedAt = entry.ModifiedAt ?? DateTime.UtcNow
         };
     }
 
@@ -82,7 +84,9 @@ internal abstract class MemoryVaultProvider : IVaultProvider
         string? notes,
         string? totp = null,
         string? path = null,
-        bool favorite = false) =>
+        bool favorite = false,
+        DateTime? createdAt = null,
+        DateTime? modifiedAt = null) =>
         new()
         {
             ExternalId = id,
@@ -94,7 +98,9 @@ internal abstract class MemoryVaultProvider : IVaultProvider
             Totp = totp,
             Path = path,
             IsFavorite = favorite,
-            ItemType = VaultItemType.Login
+            ItemType = VaultItemType.Login,
+            CreatedAt = createdAt,
+            ModifiedAt = modifiedAt
         };
 }
 
@@ -223,8 +229,22 @@ internal sealed class KeePassVaultProvider : MemoryVaultProvider
                 pe.Strings.ReadSafe(PwDefs.UrlField),
                 pe.Strings.ReadSafe(PwDefs.NotesField),
                 path: BuildPath(pe),
-                favorite: favorite);
+                favorite: favorite,
+                createdAt: ToUtc(pe.CreationTime),
+                modifiedAt: ToUtc(pe.LastModificationTime));
         }
+    }
+
+    private static DateTime? ToUtc(DateTime value)
+    {
+        if (value == default || value.Year < 1980)
+            return null;
+        return value.Kind switch
+        {
+            DateTimeKind.Utc => value,
+            DateTimeKind.Local => value.ToUniversalTime(),
+            _ => DateTime.SpecifyKind(value, DateTimeKind.Utc)
+        };
     }
 
     private static string BuildPath(PwEntry entry)
@@ -313,7 +333,19 @@ internal sealed class LastPassVaultProvider : MemoryVaultProvider
                 new AuthenticatorLastPassLogger(),
                 ct);
             SetEntries(vault.Accounts.Select(a =>
-                MapLogin(a.Id, a.Name, a.Username, a.Password, a.Url, a.Notes, a.Totp, a.Path, a.IsFavorite)));
+                MapLogin(
+                    a.Id,
+                    a.Name,
+                    a.Username,
+                    a.Password,
+                    a.Url,
+                    a.Notes,
+                    a.Totp,
+                    a.Path,
+                    a.IsFavorite,
+                    createdAt: a.CreatedAt,
+                    // Prefer last password change when present — more useful for Diff accuracy.
+                    modifiedAt: a.LastPasswordChangeAt ?? a.ModifiedAt)));
         }
         catch (PasswordManager.Common.BaseException ex)
         {
