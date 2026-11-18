@@ -296,6 +296,9 @@ internal sealed class OpVaultProvider : MemoryVaultProvider
 
 internal sealed class LastPassVaultProvider : MemoryVaultProvider
 {
+    private readonly object _gate = new();
+    private PasswordManager.LastPass.Vault? _vault;
+
     public override string ProviderId => "LastPass";
     public override string DisplayName => "LastPass";
     public override ProviderCapabilities Capabilities { get; } = new()
@@ -303,7 +306,7 @@ internal sealed class LastPassVaultProvider : MemoryVaultProvider
         RequiresUsername = true,
         SupportsFavorites = true,
         SupportsSecureNotes = true,
-        // Live session write-back by origin id (LastPass remote API write not wired yet).
+        // Live session write-back via show_website.php (session retained until Disconnect).
         SupportsWriteBack = true
     };
 
@@ -332,20 +335,30 @@ internal sealed class LastPassVaultProvider : MemoryVaultProvider
                 },
                 new AuthenticatorLastPassLogger(),
                 ct);
-            SetEntries(vault.Accounts.Select(a =>
-                MapLogin(
-                    a.Id,
-                    a.Name,
-                    a.Username,
-                    a.Password,
-                    a.Url,
-                    a.Notes,
-                    a.Totp,
-                    a.Path,
-                    a.IsFavorite,
-                    createdAt: a.CreatedAt,
-                    // Prefer last password change when present — more useful for Diff accuracy.
-                    modifiedAt: a.LastPasswordChangeAt ?? a.ModifiedAt)));
+
+            lock (_gate)
+            {
+                CloseVault();
+                _vault = vault;
+                SetEntries(vault.Accounts.Select(a =>
+                    MapLogin(
+                        a.Id,
+                        a.Name,
+                        a.Username,
+                        a.Password,
+                        a.Url,
+                        a.Notes,
+                        a.Totp,
+                        a.Path,
+                        a.IsFavorite,
+                        createdAt: a.CreatedAt,
+                        // Prefer last password change when present — more useful for Diff accuracy.
+                        modifiedAt: a.LastPasswordChangeAt ?? a.ModifiedAt)));
+            }
+
+            LoggingConfiguration.LogInfo(
+                $"LastPass connected with {vault.Accounts.Length} accounts (write-back enabled).",
+                nameof(LastPassVaultProvider));
         }
         catch (PasswordManager.Common.BaseException ex)
         {
@@ -354,6 +367,49 @@ internal sealed class LastPassVaultProvider : MemoryVaultProvider
             LoggingConfiguration.LogException(ex, $"LastPass login failed: {ex.Message}", nameof(LastPassVaultProvider));
             throw;
         }
+    }
+
+    public override void Disconnect()
+    {
+        lock (_gate)
+            CloseVault();
+        base.Disconnect();
+    }
+
+    public override async Task UpdateEntryAsync(ProviderEntry entry, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(entry);
+        if (string.IsNullOrWhiteSpace(entry.ExternalId))
+            throw new ArgumentException("Origin store id (ExternalId) is required.", nameof(entry));
+
+        PasswordManager.LastPass.Vault vault;
+        lock (_gate)
+        {
+            if (_vault is null || !IsConnected)
+                throw new InvalidOperationException("LastPass is not connected.");
+            vault = _vault;
+        }
+
+        await vault.UpdateAccountAsync(
+            entry.ExternalId.Trim(),
+            entry.Title ?? "",
+            entry.Username ?? "",
+            entry.Password ?? "",
+            entry.Url ?? "",
+            entry.Notes ?? "",
+            entry.IsFavorite,
+            ct);
+
+        UpdateMemoryEntry(entry);
+        LoggingConfiguration.LogInfo(
+            $"LastPass remote update OK for origin id '{entry.ExternalId}'.",
+            nameof(LastPassVaultProvider));
+    }
+
+    private void CloseVault()
+    {
+        _vault?.Dispose();
+        _vault = null;
     }
 }
 
