@@ -65,7 +65,12 @@ public partial class MainWindow : Window
             RefreshUnlockCapabilities();
             ConfigureLockOverlay();
         };
-        SettingsPage.DataChanged += async (_, _) => await CodesPage.ReloadAsync();
+        SettingsPage.DataChanged += async (_, _) =>
+        {
+            await CodesPage.ReloadAsync();
+            await VaultPage.ReloadAsync();
+        };
+        SettingsPage.VaultPurged += async (_, _) => await VaultPage.ReloadAfterDeveloperPurgeAsync();
         SettingsPage.DesktopSettingsChanged += (_, _) =>
         {
             LoadUiDesktopPrefs();
@@ -1077,7 +1082,7 @@ public partial class MainWindow : Window
             }
 
             ForegroundWindowMonitor.Instance.Start();
-            await ProviderSessionService.Instance.ReconnectAllAsync();
+            // Provider reconnect is deferred until after UI unlock — LastPass/KeePass must not block YubiKey.
         }
         catch (Exception ex)
         {
@@ -1105,6 +1110,21 @@ public partial class MainWindow : Window
         BackupPage.SetCodesMasked(false);
         await CodesPage.ReloadAsync();
         LoggingConfiguration.LogInfo("Auto-lock cleared.", nameof(MainWindow));
+
+        _ = ReconnectProvidersInBackgroundAsync();
+    }
+
+    private async Task ReconnectProvidersInBackgroundAsync()
+    {
+        try
+        {
+            await ProviderSessionService.Instance.ReconnectAllAsync();
+            LoggingConfiguration.LogInfo("Background provider reconnect finished.", nameof(MainWindow));
+        }
+        catch (Exception ex)
+        {
+            LoggingConfiguration.LogException(ex, "Background provider reconnect failed.", nameof(MainWindow));
+        }
     }
 
     private void CodesNav_Click(object sender, RoutedEventArgs e) => ShowPage(CodesPage);

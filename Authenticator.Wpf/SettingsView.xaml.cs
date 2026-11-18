@@ -66,6 +66,8 @@ public partial class SettingsView : UserControl
     private readonly WindowsHelloUnlockService _hello = new();
     private readonly QrCodeService _qr = new();
     private readonly AccountImportService _import = new();
+    private readonly DebugPreferences _debugPrefs = new();
+    private readonly VaultItemService _vaultItems = new();
     private bool _loading = true;
     private bool _busy;
     private bool _helloAvailable;
@@ -76,6 +78,8 @@ public partial class SettingsView : UserControl
     public event EventHandler<int>? AutoLockChanged;
     public event EventHandler? UnlockMethodsChanged;
     public event EventHandler? DataChanged;
+    /// <summary>Developer vault purge completed — vault UI should clear items and Conflicts.</summary>
+    public event EventHandler? VaultPurged;
     public event EventHandler? DesktopSettingsChanged;
     public event EventHandler? BackRequested;
 
@@ -107,6 +111,7 @@ public partial class SettingsView : UserControl
             AppVersionText.Text = $"Authenticator {GetAppVersion()}";
             RefreshConnectionUi();
             RefreshUnlockSummary();
+            RefreshDeveloperUi();
         }
         catch (Exception ex)
         {
@@ -116,6 +121,71 @@ public partial class SettingsView : UserControl
         finally
         {
             _loading = false;
+        }
+    }
+
+    private void RefreshDeveloperUi()
+    {
+        var debug = _debugPrefs.Load();
+        DeveloperModeToggle.IsChecked = debug.DeveloperMode;
+        DeveloperActionsPanel.Visibility = debug.DeveloperMode ? Visibility.Visible : Visibility.Collapsed;
+        DeveloperStatus.Text = string.Empty;
+    }
+
+    private void DeveloperMode_Changed(object sender, RoutedEventArgs e)
+    {
+        if (_loading)
+            return;
+
+        var enabled = DeveloperModeToggle.IsChecked == true;
+        _debugPrefs.Save(new DebugPreferencesState { DeveloperMode = enabled });
+        DeveloperActionsPanel.Visibility = enabled ? Visibility.Visible : Visibility.Collapsed;
+        DeveloperStatus.Text = enabled
+            ? "Developer mode on — purge is available."
+            : string.Empty;
+    }
+
+    private async void PurgeVault_Click(object sender, RoutedEventArgs e)
+    {
+        if (_busy)
+            return;
+
+        var confirm = MessageBox.Show(
+            "Hard-delete ALL Shared vault logins, custom fields, provider links, and conflicts?\n\n" +
+            "2FA accounts, folders, unlock methods, and provider Connect credentials are kept.\n" +
+            "You can re-import from KeePass / LastPass afterward.",
+            "Purge Shared vault",
+            MessageBoxButton.YesNo,
+            MessageBoxImage.Warning,
+            MessageBoxResult.No);
+        if (confirm != MessageBoxResult.Yes)
+            return;
+
+        _busy = true;
+        PurgeVaultButton.IsEnabled = false;
+        DeveloperStatus.Text = "Purging…";
+        try
+        {
+            var result = await _vaultItems.PurgeAllVaultDataAsync();
+            DeveloperStatus.Text =
+                $"Purged {result.ItemsDeleted} items and {result.LinksDeleted} links; " +
+                $"remaining={result.RemainingItems} (conflicts cleared).";
+            LoggingConfiguration.LogInfo(
+                $"Settings purge: deleted items={result.ItemsDeleted}, links={result.LinksDeleted}, remaining={result.RemainingItems}.",
+                nameof(SettingsView));
+            VaultPurged?.Invoke(this, EventArgs.Empty);
+            DataChanged?.Invoke(this, EventArgs.Empty);
+        }
+        catch (Exception ex)
+        {
+            LoggingConfiguration.LogException(ex, "Vault purge failed.", nameof(SettingsView));
+            DeveloperStatus.Text = ex.Message;
+            MessageBox.Show(ex.Message, "Purge failed", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+        finally
+        {
+            PurgeVaultButton.IsEnabled = true;
+            _busy = false;
         }
     }
 

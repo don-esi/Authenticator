@@ -96,7 +96,7 @@ public sealed class VaultMigrationService
                 IsDeleted bit NOT NULL,
                 Username nvarchar(300) NULL,
                 Password nvarchar(max) NULL,
-                Url nvarchar(1000) NULL,
+                Url nvarchar(max) NULL,
                 LinkedAccountId int NULL,
                 TotpSecret nvarchar(max) NULL,
                 PayloadJson nvarchar(max) NULL,
@@ -113,6 +113,21 @@ public sealed class VaultMigrationService
                AND COL_LENGTH(N'dbo.VaultItems', N'LastUsedAt') IS NULL
             BEGIN
               ALTER TABLE dbo.VaultItems ADD LastUsedAt datetime2 NULL;
+            END
+            """, ct);
+
+        // LastPass (and similar) store OAuth/hash URLs longer than the original nvarchar(1000).
+        await db.Database.ExecuteSqlRawAsync(
+            """
+            IF EXISTS (
+                SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS
+                WHERE TABLE_SCHEMA = N'dbo' AND TABLE_NAME = N'VaultItems' AND COLUMN_NAME = N'Url'
+                  AND DATA_TYPE = N'nvarchar'
+                  AND CHARACTER_MAXIMUM_LENGTH IS NOT NULL
+                  AND CHARACTER_MAXIMUM_LENGTH > 0
+                  AND CHARACTER_MAXIMUM_LENGTH < 4000)
+            BEGIN
+              ALTER TABLE dbo.VaultItems ALTER COLUMN Url nvarchar(max) NULL;
             END
             """, ct);
 

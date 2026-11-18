@@ -5,10 +5,6 @@ using KeePassLib;
 using KeePassLib.Keys;
 using KeePassLib.Serialization;
 using KeePassLib.Security;
-using OneOf;
-using PasswordManager.Common;
-using PasswordManager.Duo;
-using PasswordManager.LastPass.Ui;
 
 namespace Authenticator.Services.Providers;
 
@@ -298,59 +294,42 @@ internal sealed class LastPassVaultProvider : MemoryVaultProvider
         var clientId = string.IsNullOrWhiteSpace(request.ClientId)
             ? PasswordManager.LastPass.Vault.GenerateRandomClientId()
             : request.ClientId;
-        var vault = await PasswordManager.LastPass.Vault.Open(
-            request.Username,
-            request.Password,
-            new PasswordManager.LastPass.ClientInfo(
-                PasswordManager.LastPass.Platform.Desktop,
-                clientId,
-                "Authenticator"),
-            new SilentLastPassUi(),
-            new PasswordManager.LastPass.ParserOptions { ParseSecureNotesToAccount = true },
-            null,
-            ct);
-        SetEntries(vault.Accounts.Select(a =>
-            MapLogin(a.Id, a.Name, a.Username, a.Password, a.Url, a.Notes, a.Totp, a.Path, a.IsFavorite)));
+        var ui = request.LastPassUi ?? LastPassSilentUi.Instance;
+        try
+        {
+            var vault = await PasswordManager.LastPass.Vault.Open(
+                request.Username,
+                request.Password,
+                new PasswordManager.LastPass.ClientInfo(
+                    PasswordManager.LastPass.Platform.Desktop,
+                    clientId,
+                    "Authenticator"),
+                ui,
+                new PasswordManager.LastPass.ParserOptions
+                {
+                    ParseSecureNotesToAccount = true,
+                    LoggingEnabled = true
+                },
+                new AuthenticatorLastPassLogger(),
+                ct);
+            SetEntries(vault.Accounts.Select(a =>
+                MapLogin(a.Id, a.Name, a.Username, a.Password, a.Url, a.Notes, a.Totp, a.Path, a.IsFavorite)));
+        }
+        catch (PasswordManager.Common.BaseException ex)
+        {
+            // Server message (incl. new-device email verification) is already on ex.Message —
+            // log and rethrow so the connect dialog shows it verbatim.
+            LoggingConfiguration.LogException(ex, $"LastPass login failed: {ex.Message}", nameof(LastPassVaultProvider));
+            throw;
+        }
     }
+}
 
-    private sealed class SilentLastPassUi : IAsyncUi
-    {
-        public Task<OneOf<Otp, MfaMethod, Canceled>> ProvideGoogleAuthPasscode(
-            int attempt, MfaMethod[] otherMethods, CancellationToken cancellationToken) =>
-            CanceledOtp();
-
-        public Task<OneOf<Otp, MfaMethod, Canceled>> ProvideMicrosoftAuthPasscode(
-            int attempt, MfaMethod[] otherMethods, CancellationToken cancellationToken) =>
-            CanceledOtp();
-
-        public Task<OneOf<Otp, MfaMethod, Canceled>> ProvideYubikeyPasscode(
-            int attempt, MfaMethod[] otherMethods, CancellationToken cancellationToken) =>
-            CanceledOtp();
-
-        public Task<OneOf<Otp, WaitForOutOfBand, MfaMethod, Canceled>> ApproveLastPassAuth(
-            int attempt, MfaMethod[] otherMethods, CancellationToken cancellationToken) =>
-            Task.FromResult<OneOf<Otp, WaitForOutOfBand, MfaMethod, Canceled>>(new Canceled("Authenticator silent UI"));
-
-        public Task<OneOf<DuoChoice, MfaMethod, DuoCancelled>> ChooseDuoFactor(
-            DuoDevice[] devices, MfaMethod[] otherMethods, CancellationToken cancellationToken) =>
-            Task.FromResult(IDuoAsyncUi.CancelChoice());
-
-        public Task<OneOf<DuoPasscode, DuoCancelled>> ProvideDuoPasscode(
-            DuoDevice device, CancellationToken cancellationToken) =>
-            Task.FromResult(IDuoAsyncUi.CancelPasscode());
-
-        public Task DuoDone(CancellationToken cancellationToken) => Task.CompletedTask;
-
-        public Task UpdateDuoStatus(DuoStatus status, string text, CancellationToken cancellationToken) =>
-            Task.CompletedTask;
-
-        public Task<OneOf<string, Canceled>> PerformSsoLogin(
-            string url, string expectedRedirectUrl, CancellationToken cancellationToken) =>
-            Task.FromResult<OneOf<string, Canceled>>(new Canceled("Authenticator silent UI"));
-
-        private static Task<OneOf<Otp, MfaMethod, Canceled>> CanceledOtp() =>
-            Task.FromResult<OneOf<Otp, MfaMethod, Canceled>>(new Canceled("Authenticator silent UI"));
-    }
+/// <summary>Forwards PasswordManager LastPass logs into Authenticator Serilog (secrets censored upstream).</summary>
+file sealed class AuthenticatorLastPassLogger : PasswordManager.Common.ISecureLogger
+{
+    public void Log(PasswordManager.Common.LogEntry entry) =>
+        LoggingConfiguration.LogInfo($"[{entry.Tag}] {entry.Message}", "LastPass");
 }
 
 /// <summary>Cloud providers that need interactive MFA: façade present; connect stores credential probe result or fails clearly.</summary>

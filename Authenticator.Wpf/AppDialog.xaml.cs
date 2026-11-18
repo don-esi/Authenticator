@@ -44,10 +44,8 @@ public partial class AppDialog : Window
         string title = "Authenticator",
         AppDialogKind kind = AppDialogKind.Info)
     {
-        var dialog = new AppDialog(title, message, kind, AppDialogButtons.Ok, null, null)
-        {
-            Owner = owner ?? Application.Current?.MainWindow
-        };
+        var dialog = new AppDialog(title, message, kind, AppDialogButtons.Ok, null, null);
+        AssignOwner(dialog, owner);
         dialog.ShowDialog();
     }
 
@@ -65,10 +63,8 @@ public partial class AppDialog : Window
             kind,
             AppDialogButtons.OkCancel,
             confirmText,
-            cancelText)
-        {
-            Owner = owner ?? Application.Current?.MainWindow
-        };
+            cancelText);
+        AssignOwner(dialog, owner);
         return dialog.ShowDialog() == true;
     }
 
@@ -78,11 +74,35 @@ public partial class AppDialog : Window
         string title = "Confirm",
         AppDialogKind kind = AppDialogKind.Confirm)
     {
-        var dialog = new AppDialog(title, message, kind, AppDialogButtons.YesNo, "Yes", "No")
-        {
-            Owner = owner ?? Application.Current?.MainWindow
-        };
+        var dialog = new AppDialog(title, message, kind, AppDialogButtons.YesNo, "Yes", "No");
+        AssignOwner(dialog, owner);
         return dialog.ShowDialog() == true;
+    }
+
+    /// <summary>
+    /// WPF throws if Owner is a window that has already closed (e.g. connect dialog
+    /// Cancel while an async catch still tries to Alert).
+    /// </summary>
+    private static void AssignOwner(Window dialog, Window? preferred)
+    {
+        var owner = PreferLiveOwner(preferred) ?? PreferLiveOwner(Application.Current?.MainWindow);
+        if (owner is not null)
+            dialog.Owner = owner;
+    }
+
+    private static Window? PreferLiveOwner(Window? window)
+    {
+        if (window is null)
+            return null;
+        try
+        {
+            // IsLoaded is false after Close(); accessing properties on a closed HWND is unsafe.
+            return window.IsLoaded ? window : null;
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     private void ApplyKind(AppDialogKind kind)

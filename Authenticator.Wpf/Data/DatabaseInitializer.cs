@@ -38,6 +38,7 @@ public static class DatabaseInitializer
 
             await EnsureBackupCodeColumnWidthAsync(context);
             await EnsureDockHandleOffsetColumnAsync(context);
+            await EnsureVaultItemUrlColumnWidthAsync(context);
             await EnsureVaultSchemaAsync(context);
 
             // Ensure at least one AppSettings record exists
@@ -100,6 +101,35 @@ public static class DatabaseInitializer
         catch (Exception ex)
         {
             LoggingConfiguration.LogException(ex, "Failed to ensure WindowDockHandleOffsetY column.", nameof(DatabaseInitializer));
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// VaultItems.Url was nvarchar(1000); LastPass OAuth/state URLs exceed that and abort import.
+    /// </summary>
+    private static async Task EnsureVaultItemUrlColumnWidthAsync(AuthenticatorDbContext context)
+    {
+        try
+        {
+            await context.Database.ExecuteSqlRawAsync(
+                """
+                IF EXISTS (
+                    SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS
+                    WHERE TABLE_SCHEMA = N'dbo' AND TABLE_NAME = N'VaultItems' AND COLUMN_NAME = N'Url'
+                      AND DATA_TYPE = N'nvarchar'
+                      AND CHARACTER_MAXIMUM_LENGTH IS NOT NULL
+                      AND CHARACTER_MAXIMUM_LENGTH > 0
+                      AND CHARACTER_MAXIMUM_LENGTH < 4000)
+                BEGIN
+                    ALTER TABLE dbo.VaultItems ALTER COLUMN Url nvarchar(max) NULL;
+                END
+                """);
+            LoggingConfiguration.LogInfo("VaultItems.Url column width ensured (nvarchar(max)).", nameof(DatabaseInitializer));
+        }
+        catch (Exception ex)
+        {
+            LoggingConfiguration.LogException(ex, "Failed to widen VaultItems.Url column.", nameof(DatabaseInitializer));
             throw;
         }
     }

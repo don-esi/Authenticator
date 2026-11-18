@@ -55,10 +55,23 @@ WealthForge may mirror the same `connection.json` shape and probe protocol.
 
 ## Follow-ups
 
-- Interactive MFA UI for cloud providers beyond LastPass silent/JSON path
-- Provider write-back for managers that support API updates
+- Interactive MFA UI for remaining cloud providers (Bitwarden/Dashlane/etc. still JSON façade; LastPass Connect/Import prompts OTP/YubiKey like WealthForge)
 - Always-on discovery helper when Host app is closed
 - Unify 2FA Folders with VaultFolders
+- Optional Diff auto-fill into browser after Open site (currently copy-password helpers)
+
+## Reconcile / consolidate (G6+)
+
+Vault is the consolidation hub across providers (not a third silo of duplicates).
+
+- **Identity** = normalized **username + host** (strip `www.`; ignore path/query; **include non-default port** so `host:5000` ≠ `host:8123`). Username+host only consolidates when **titles are compatible** (equal / substring / one empty) — e.g. Media vs HomeAssistant on the same host must not merge. Fallback: title+username when host/username missing.
+- **Soft-merge** is primary: fill empty vault fields from provider; keep vault when both sides have non-empty non-password values.
+- **Password conflict** only when both sides have non-empty differing passwords (compare after decrypt) → mismatch badge → Diff. Matching/empty passwords → aligned (no Diff).
+- Clean slate + **one** linked provider: skip auto conflict scan (vault came from that store). Diff/reconcile still available for edge cases. Auto-scan when **two or more** providers have links.
+- Do **not** use full content-hash equality for aligned vs conflict (provider formatting noise).
+- **Multi-source Diff**: columns = Vault + every linked provider. Large **This is correct** checkbox picks a whole source; click a field cell to merge per-field. **Apply to vault** then confirm **Update all linked sources** (push write-back). Unlink for false matches.
+- **Developer purge**: hard-deletes Shared vault items/links (verified remaining=0, SQL fallback); clears Conflicts UI; does not remove Connect credentials.
+- **Unlock**: provider `ReconnectAll` runs in the background after Codes UI is shown (does not block YubiKey/PIN unlock).
 
 ## Provider connect vs import (G5+)
 

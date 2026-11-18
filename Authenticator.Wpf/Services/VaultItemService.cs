@@ -245,6 +245,95 @@ public sealed class VaultItemService
         await _offline.DeleteAsync(id, softDelete, ct);
     }
 
+    public sealed record VaultPurgeResult(int ItemsDeleted, int LinksDeleted, int RemainingItems, int RemainingLinks);
+
+    /// <summary>
+    /// Hard-delete all Shared vault items, custom fields, and external links (folders kept).
+    /// Clears conflict links, offline mirror, offline change queue, and provider Diff cache.
+    /// Verifies remaining row counts (SQL fallback if EF delete leaves rows).
+    /// </summary>
+    public async Task<VaultPurgeResult> PurgeAllVaultDataAsync(CancellationToken ct = default)
+    {
+        Providers.ProviderSessionService.Instance.ClearRemoteCache();
+
+        LoggingConfiguration.LogInfo(
+            $"Developer purge starting — profile={ConnectionConfig.ActiveProfileName}, " +
+            $"server={ConnectionConfig.Server}, db={ConnectionConfig.Database}, offline={ConnectionConfig.IsOfflineMode}.",
+            nameof(VaultItemService));
+
+        var itemsDeleted = 0;
+        var linksDeleted = 0;
+        var remainingItems = 0;
+        var remainingLinks = 0;
+
+        if (!ConnectionConfig.IsOfflineMode)
+        {
+            await using var db = new AuthenticatorDbContext();
+            linksDeleted = await db.ExternalLinks.CountAsync(ct);
+            itemsDeleted = await db.VaultItems.CountAsync(ct);
+            await db.ExternalLinks.ExecuteDeleteAsync(ct);
+            await db.VaultCustomFields.ExecuteDeleteAsync(ct);
+            await db.VaultItems.ExecuteDeleteAsync(ct);
+            await db.OfflineChangeQueue.ExecuteDeleteAsync(ct);
+
+            remainingLinks = await db.ExternalLinks.CountAsync(ct);
+            remainingItems = await db.VaultItems.CountAsync(ct);
+            if (remainingItems > 0 || remainingLinks > 0)
+            {
+                LoggingConfiguration.LogInfo(
+                    $"EF purge left remaining items={remainingItems}, links={remainingLinks}; trying raw SQL.",
+                    nameof(VaultItemService));
+                await db.Database.ExecuteSqlRawAsync(
+                    "DELETE FROM ExternalLinks; DELETE FROM VaultCustomFields; DELETE FROM VaultItems; DELETE FROM OfflineChangeQueue;",
+                    ct);
+                remainingLinks = await db.ExternalLinks.CountAsync(ct);
+                remainingItems = await db.VaultItems.CountAsync(ct);
+            }
+        }
+
+        try
+        {
+            await using var offline = new OfflineVaultDbContext();
+            if (ConnectionConfig.IsOfflineMode)
+            {
+                linksDeleted = await offline.ExternalLinks.CountAsync(ct);
+                itemsDeleted = await offline.VaultItems.CountAsync(ct);
+            }
+
+            await offline.ExternalLinks.ExecuteDeleteAsync(ct);
+            await offline.VaultCustomFields.ExecuteDeleteAsync(ct);
+            await offline.VaultItems.ExecuteDeleteAsync(ct);
+            await offline.OfflineChangeQueue.ExecuteDeleteAsync(ct);
+
+            if (ConnectionConfig.IsOfflineMode)
+            {
+                remainingLinks = await offline.ExternalLinks.CountAsync(ct);
+                remainingItems = await offline.VaultItems.CountAsync(ct);
+            }
+        }
+        catch (Exception ex)
+        {
+            LoggingConfiguration.LogException(ex, "Offline vault purge failed.", nameof(VaultItemService));
+        }
+
+        Providers.ProviderSessionService.Instance.ClearRemoteCache();
+
+        if (remainingItems > 0 || remainingLinks > 0)
+        {
+            LoggingConfiguration.LogInfo(
+                $"Purge incomplete: remaining items={remainingItems}, links={remainingLinks}.",
+                nameof(VaultItemService));
+            throw new InvalidOperationException(
+                $"Purge did not clear the vault (remaining items={remainingItems}, links={remainingLinks}). " +
+                $"Check connection profile {ConnectionConfig.ActiveProfileName} → {ConnectionConfig.Server}/{ConnectionConfig.Database}.");
+        }
+
+        LoggingConfiguration.LogInfo(
+            $"Purged vault data: deleted items={itemsDeleted}, links={linksDeleted}; remaining=0.",
+            nameof(VaultItemService));
+        return new VaultPurgeResult(itemsDeleted, linksDeleted, remainingItems, remainingLinks);
+    }
+
     public async Task<List<VaultFolder>> GetFoldersAsync(CancellationToken ct = default)
     {
         if (ConnectionConfig.IsOfflineMode)

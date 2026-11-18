@@ -106,6 +106,7 @@ public partial class VaultView : UserControl
             SelectFilter(VaultFilterMode.Favorites, reload: false);
 
         CloseOpenSlide();
+        _conflictScanCts?.Cancel();
         try
         {
             LoadUiPrefs();
@@ -117,12 +118,38 @@ public partial class VaultView : UserControl
             _allRowsView = new ObservableCollection<VaultRow>(rows);
             await ApplyFilterAsync();
             // Conflict hash compare is expensive — kick a lazy background scan when providers are live.
-            if (!_skipConflictScanOnReload)
+            // Skip when vault is empty or only one provider is linked (clean single-store import).
+            if (!_skipConflictScanOnReload && _all.Count > 0 && GetSyncedProviderIds().Count > 1)
                 ScheduleConflictScan(announce: false);
         }
         catch (Exception ex)
         {
             AppDialog.Alert(Window.GetWindow(this), $"Could not load vault: {ex.Message}", "Vault", AppDialogKind.Warning);
+        }
+    }
+
+    /// <summary>
+    /// After Settings developer purge: wipe in-memory vault + Conflicts chip, skip conflict re-scan, reload from DB.
+    /// </summary>
+    public async Task ReloadAfterDeveloperPurgeAsync()
+    {
+        _conflictScanCts?.Cancel();
+        _skipConflictScanOnReload = true;
+        try
+        {
+            CloseOpenSlide();
+            _passwordIndex = null;
+            _all = new List<VaultItem>();
+            _rowById = new Dictionary<Guid, VaultRow>();
+            _allRowsView = new ObservableCollection<VaultRow>();
+            SelectFilter(VaultFilterMode.All, reload: false);
+            UpdateConflictsChip();
+            ItemsList.ItemsSource = Array.Empty<object>();
+            await ReloadAsync();
+        }
+        finally
+        {
+            _skipConflictScanOnReload = false;
         }
     }
 
@@ -338,6 +365,8 @@ public partial class VaultView : UserControl
         if (ChipConflicts is not null)
             ChipConflicts.IsChecked = mode == VaultFilterMode.Conflicts;
         _chipSync = false;
+        if (TryFindResource("VaultListTemplateSelector") is VaultListTemplateSelector selector)
+            selector.UseConflictTemplate = mode == VaultFilterMode.Conflicts;
         UpdateFilterHint();
         if (reload)
             _ = ReloadAsync();
@@ -440,9 +469,10 @@ public partial class VaultView : UserControl
     {
         if (_groupMode == VaultGroupMode.None)
         {
-            // Same id order: mutate existing row instances so bindings refresh (title/user/badge)
-            // without resetting scroll. Replacing ItemsSource alone can leave virtualized chips stale.
-            if (SameRowIds(_rows, nextList) && ReferenceEquals(ItemsList.ItemsSource, _rows))
+            // Conflicts uses a different DataTemplate — always replace ItemsSource so the selector re-runs.
+            if (_filter != VaultFilterMode.Conflicts &&
+                SameRowIds(_rows, nextList) &&
+                ReferenceEquals(ItemsList.ItemsSource, _rows))
             {
                 for (var i = 0; i < _rows.Count; i++)
                     _rows[i].ApplyFrom(nextList[i]);
@@ -450,6 +480,7 @@ public partial class VaultView : UserControl
             }
 
             _rows = new ObservableCollection<VaultRow>(nextList);
+            ItemsList.ItemsSource = null;
             ItemsList.ItemsSource = _rows;
             return;
         }
@@ -994,49 +1025,206 @@ public partial class VaultView : UserControl
         if (win.ShowDialog() != true || win.ResultProvider is null)
             return;
 
-        var msg = win.ImportedCount is int n
-            ? $"Connected to {win.ResultProvider.DisplayName} and synced {n} entries."
-            : $"Connected to {win.ResultProvider.DisplayName}.";
-        AppDialog.Alert(Window.GetWindow(this), msg, "Connect");
-        await ReloadAsync();
-        if (win.ResultProvider is not null)
-            ScheduleConflictScan(win.ResultProvider.ProviderId);
+        var provider = win.ResultProvider;
+        var owner = Window.GetWindow(this);
+        AppDialog.Alert(owner, $"Connected to {provider.DisplayName}.", "Connect");
+
+        var syncNow = AppDialog.Confirm(
+            owner,
+            $"Sync entries from {provider.DisplayName} into Shared now?\n\nThis can take a while for large vaults.",
+            "Sync now?",
+            confirmText: "Sync now",
+            cancelText: "Not now");
+
+        if (syncNow)
+            await RunProviderSyncAsync(provider.ProviderId, bulkFirstSync: true);
+        else
+            await ReloadAsync();
     }
 
-    public async Task SyncConnectedProviderAsync(string providerId)
+    public async Task SyncConnectedProviderAsync(string providerId) =>
+        await RunProviderSyncAsync(providerId, bulkFirstSync: false);
+
+    private async Task RunProviderSyncAsync(string providerId, bool bulkFirstSync)
     {
+        SetBusy(true, "Syncing…");
         try
         {
-            // Fast path: import missing only. Conflict detection runs lazily in the background.
-            var result = await ProviderSessionService.Instance.SyncProviderImportAsync(providerId);
+            int imported;
+            if (bulkFirstSync)
+            {
+                if (!ProviderSessionService.Instance.TryGetLive(providerId, out var live) || live is null)
+                    throw new InvalidOperationException($"{providerId} is not connected.");
+
+                // Full import on first sync after Connect; off UI thread for spinner.
+                imported = await Task.Run(
+                    async () => await new VaultImportService().BulkImportAsync(live).ConfigureAwait(false));
+            }
+            else
+            {
+                var result = await Task.Run(
+                    async () => await ProviderSessionService.Instance
+                        .SyncProviderImportAsync(providerId)
+                        .ConfigureAwait(false));
+                imported = result.Imported;
+            }
+
             await ReloadAsync();
             ShowStatusToast(
-                result.Imported > 0
-                    ? $"Imported {result.Imported} new from {providerId}"
+                imported > 0
+                    ? $"Imported {imported} from {providerId}"
                     : $"Synced {providerId}");
-            ScheduleConflictScan(providerId);
+            // Clean slate + one provider: vault matches that store — skip auto conflict scan.
+            // Diff/reconcile still available if an edge-case conflict exists. Scan when 2+ providers linked.
+            MaybeScheduleConflictScanAfterSync(providerId);
         }
         catch (Exception ex)
         {
-            AppDialog.Alert(Window.GetWindow(this), ex.Message, "Sync failed", AppDialogKind.Warning);
+            AppDialog.Alert(Window.GetWindow(this), FormatSyncError(ex), "Sync failed", AppDialogKind.Warning);
         }
+        finally
+        {
+            SetBusy(false);
+        }
+    }
+
+    private void MaybeScheduleConflictScanAfterSync(string? providerId = null)
+    {
+        var synced = GetSyncedProviderIds();
+        if (synced.Count <= 1)
+            return;
+        ScheduleConflictScan(providerId, announce: true);
+    }
+
+    private void SetBusy(bool busy, string? header = null)
+    {
+        if (header is not null)
+            BusyIndicator.Header = header;
+        BusyOverlay.Visibility = busy ? Visibility.Visible : Visibility.Collapsed;
+        BusyIndicator.IsBusy = busy;
+    }
+
+    private static string FormatSyncError(Exception ex)
+    {
+        var cur = ex;
+        while (cur.InnerException is not null)
+            cur = cur.InnerException;
+        return string.IsNullOrWhiteSpace(cur.Message) ? ex.Message : cur.Message;
     }
 
     public async Task SyncAllConnectedAsync()
     {
+        SetBusy(true, "Syncing…");
         try
         {
-            var result = await ProviderSessionService.Instance.SyncAllImportAsync();
+            var result = await Task.Run(
+                async () => await ProviderSessionService.Instance.SyncAllImportAsync().ConfigureAwait(false));
             await ReloadAsync();
             ShowStatusToast(
                 result.Imported > 0
                     ? $"Imported {result.Imported} new from connected providers"
                     : "Synced connected providers");
-            ScheduleConflictScan();
+            MaybeScheduleConflictScanAfterSync();
         }
         catch (Exception ex)
         {
-            AppDialog.Alert(Window.GetWindow(this), ex.Message, "Sync failed", AppDialogKind.Warning);
+            AppDialog.Alert(Window.GetWindow(this), FormatSyncError(ex), "Sync failed", AppDialogKind.Warning);
+        }
+        finally
+        {
+            SetBusy(false);
+        }
+    }
+
+    /// <summary>Import missing + conflict scan for every saved provider, then jump to Conflicts if any.</summary>
+    public async Task ReconcileAllProvidersAsync()
+    {
+        if (ProviderSessionService.Instance.SavedConnections.Count == 0)
+        {
+            AppDialog.Alert(Window.GetWindow(this), "No providers are connected.", "Diff all");
+            return;
+        }
+
+        SetBusy(true, "Reconciling…");
+        try
+        {
+            // Reconnect on UI thread first (LastPass MFA needs a dialog if trust expired).
+            foreach (var conn in ProviderSessionService.Instance.SavedConnections.ToList())
+                await ProviderSessionService.Instance.EnsureConnectedAsync(conn.ProviderId);
+
+            var result = await Task.Run(
+                async () => await ProviderSessionService.Instance.SyncAllConnectedAsync().ConfigureAwait(false));
+
+            _skipConflictScanOnReload = true;
+            try
+            {
+                await ReloadAsync();
+            }
+            finally
+            {
+                _skipConflictScanOnReload = false;
+            }
+
+            var summary =
+                $"Imported {result.Imported} new · {result.Unchanged} matched · {result.Conflicts} conflict(s).";
+            ShowStatusToast(summary);
+
+            if (result.Conflicts > 0)
+            {
+                AppDialog.Alert(Window.GetWindow(this), summary + "\n\nOpening the Conflicts filter.", "Diff all");
+                await OpenFirstConflictForProviderAsync(null);
+            }
+            else
+            {
+                AppDialog.Alert(Window.GetWindow(this), summary, "Diff all");
+            }
+        }
+        catch (Exception ex)
+        {
+            AppDialog.Alert(Window.GetWindow(this), FormatSyncError(ex), "Diff all failed", AppDialogKind.Warning);
+        }
+        finally
+        {
+            SetBusy(false);
+        }
+    }
+
+    public async Task ReconcileProviderAsync(string providerId)
+    {
+        SetBusy(true, "Reconciling…");
+        try
+        {
+            await ProviderSessionService.Instance.EnsureConnectedAsync(providerId);
+            var result = await Task.Run(
+                async () => await ProviderSessionService.Instance
+                    .SyncProviderAsync(providerId)
+                    .ConfigureAwait(false));
+
+            _skipConflictScanOnReload = true;
+            try
+            {
+                await ReloadAsync();
+            }
+            finally
+            {
+                _skipConflictScanOnReload = false;
+            }
+
+            ShowStatusToast(
+                result.Conflicts > 0
+                    ? $"{providerId}: {result.Conflicts} conflict(s)"
+                    : $"{providerId}: reconciled ({result.Imported} new)");
+
+            if (result.Conflicts > 0)
+                await OpenFirstConflictForProviderAsync(providerId);
+        }
+        catch (Exception ex)
+        {
+            AppDialog.Alert(Window.GetWindow(this), FormatSyncError(ex), "Diff failed", AppDialogKind.Warning);
+        }
+        finally
+        {
+            SetBusy(false);
         }
     }
 
@@ -1058,24 +1246,60 @@ public partial class VaultView : UserControl
             menu.Items.Add(new Separator());
             menu.Items.Add(MakeMenu($"Review conflicts ({conflictCount})…", () =>
                 _ = OpenFirstConflictForProviderAsync(null)));
+            menu.Items.Add(MakeMenu($"Clear conflict links ({conflictCount})…", () =>
+                _ = ClearConflictLinksAsync()));
         }
 
         var saved = ProviderSessionService.Instance.SavedConnections.ToList();
+        var liveIds = new HashSet<string>(
+            ProviderSessionService.Instance.LiveConnected.Select(p => p.ProviderId),
+            StringComparer.OrdinalIgnoreCase);
+        // Synced = vault already has ExternalLink rows from this provider (empty after debug purge).
+        var syncedIds = GetSyncedProviderIds();
+
         if (saved.Count > 0)
         {
             menu.Items.Add(new Separator());
-            menu.Items.Add(MakeMenu("Sync all connected", () => _ = SyncAllConnectedAsync()));
+            var liveSynced = liveIds.Where(syncedIds.Contains).ToList();
+            if (liveIds.Count > 0)
+                menu.Items.Add(MakeMenu("Sync all connected", () => _ = SyncAllConnectedAsync()));
+            // Diff/reconcile needs prior sync data in the vault — not after a purge.
+            if (liveSynced.Count > 0)
+                menu.Items.Add(MakeMenu("Diff / reconcile all…", () => _ = ReconcileAllProvidersAsync()));
+
             foreach (var conn in saved)
             {
                 var providerId = conn.ProviderId;
-                var label = string.IsNullOrWhiteSpace(conn.DisplayName) ? providerId : conn.DisplayName;
-                var providerConflicts = _allRowsView.Count(r =>
-                    r.HasMismatch && r.HasMismatchFor(providerId));
-                var sub = new MenuItem { Header = label };
-                sub.Items.Add(MakeMenu("Sync now", () => _ = SyncConnectedProviderAsync(providerId)));
-                sub.Items.Add(MakeMenu(
-                    providerConflicts > 0 ? $"Review conflicts ({providerConflicts})…" : "Review conflicts…",
-                    () => _ = OpenFirstConflictForProviderAsync(providerId)));
+                var name = string.IsNullOrWhiteSpace(conn.DisplayName) ? providerId : conn.DisplayName;
+                var live = liveIds.Contains(providerId);
+                var synced = syncedIds.Contains(providerId);
+                var sub = new MenuItem { Header = ProviderMenuHeader(name, live, synced) };
+
+                if (live)
+                {
+                    // First sync after connect/purge — or incremental sync when already linked.
+                    sub.Items.Add(MakeMenu(
+                        synced ? "Sync now" : "Sync now (import)…",
+                        () => _ = SyncConnectedProviderAsync(providerId)));
+
+                    if (synced)
+                    {
+                        sub.Items.Add(MakeMenu("Diff / reconcile…", () => _ = ReconcileProviderAsync(providerId)));
+                        var providerConflicts = _allRowsView.Count(r =>
+                            r.HasMismatch && r.HasMismatchFor(providerId));
+                        if (providerConflicts > 0)
+                        {
+                            sub.Items.Add(MakeMenu(
+                                $"Review conflicts ({providerConflicts})…",
+                                () => _ = OpenFirstConflictForProviderAsync(providerId)));
+                        }
+                    }
+                }
+                else
+                {
+                    sub.Items.Add(MakeMenu("Reconnect…", () => _ = ReconnectProviderAsync(providerId)));
+                }
+
                 sub.Items.Add(MakeMenu("Disconnect", () => DisconnectProvider(providerId)));
                 menu.Items.Add(sub);
             }
@@ -1084,12 +1308,122 @@ public partial class VaultView : UserControl
         menu.IsOpen = true;
     }
 
+    private HashSet<string> GetSyncedProviderIds()
+    {
+        var ids = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var item in _all)
+        {
+            if (item.ExternalLinks is null)
+                continue;
+            foreach (var link in item.ExternalLinks)
+            {
+                if (string.IsNullOrWhiteSpace(link.Provider) ||
+                    string.Equals(link.Provider, "Shared", StringComparison.OrdinalIgnoreCase))
+                    continue;
+                ids.Add(link.Provider);
+            }
+        }
+
+        return ids;
+    }
+
+    private static string ProviderMenuHeader(string name, bool live, bool synced)
+    {
+        if (!live)
+            return synced ? $"{name} (not connected)" : $"{name} (not connected · not synced)";
+        return synced ? name : $"{name} (not synced)";
+    }
+
+    private async Task ReconnectProviderAsync(string providerId)
+    {
+        SetBusy(true, $"Connecting {providerId}…");
+        try
+        {
+            await ProviderSessionService.Instance.EnsureConnectedAsync(providerId);
+            AppDialog.Alert(Window.GetWindow(this), $"{providerId} connected.", "Providers");
+        }
+        catch (Exception ex)
+        {
+            AppDialog.Alert(Window.GetWindow(this), FormatSyncError(ex), "Reconnect failed", AppDialogKind.Warning);
+        }
+        finally
+        {
+            SetBusy(false);
+        }
+    }
+
+    private async Task ClearConflictLinksAsync()
+    {
+        var count = _allRowsView.Count(r => r.HasMismatch);
+        if (count == 0)
+            return;
+
+        if (!AppDialog.Confirm(
+                Window.GetWindow(this),
+                $"Remove {count} conflicted provider link(s)?\n\n" +
+                "Vault items stay. Conflicts clear immediately. " +
+                "Next Sync can re-import those provider entries with current match rules — no full purge needed.",
+                "Clear conflict links",
+                confirmText: "Clear links",
+                kind: AppDialogKind.Warning))
+            return;
+
+        SetBusy(true, "Clearing conflicts…");
+        try
+        {
+            var removed = await new VaultImportService().ClearAllConflictLinksAsync();
+            await ReloadAsync();
+            ShowStatusToast(removed > 0 ? $"Cleared {removed} conflict link(s)" : "No conflict links found");
+        }
+        catch (Exception ex)
+        {
+            AppDialog.Alert(Window.GetWindow(this), ex.Message, "Clear conflicts", AppDialogKind.Warning);
+        }
+        finally
+        {
+            SetBusy(false);
+        }
+    }
+
     private void Badge_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
         if (sender is not FrameworkElement { Tag: VaultRow row } || !row.HasMismatch)
             return;
         e.Handled = true;
         _ = OpenDiffAsync(row);
+    }
+
+    private void ConflictRow_Click(object sender, MouseButtonEventArgs e)
+    {
+        // Ignore clicks on the Sync button (it has its own handler).
+        if (e.OriginalSource is DependencyObject source &&
+            FindAncestor<Button>(source) is not null)
+            return;
+
+        if (sender is not FrameworkElement { Tag: VaultRow row })
+            return;
+        e.Handled = true;
+        _ = OpenDiffAsync(row);
+    }
+
+    private void ConflictSync_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not FrameworkElement { Tag: VaultRow row })
+            return;
+        e.Handled = true;
+        _ = OpenDiffAsync(row);
+    }
+
+    private static T? FindAncestor<T>(DependencyObject? current) where T : DependencyObject
+    {
+        while (current is not null)
+        {
+            if (current is T match)
+                return match;
+            current = VisualTreeHelper.GetParent(current);
+        }
+
+        return null;
     }
 
     private async Task OpenFirstConflictForProviderAsync(string? providerId)
@@ -1134,24 +1468,34 @@ public partial class VaultView : UserControl
             if (item is null)
                 return;
 
-            var link = item.ExternalLinks
-                .Where(l => l.IsMismatch)
-                .OrderByDescending(l => string.Equals(l.Provider, preferredProviderId, StringComparison.OrdinalIgnoreCase))
-                .FirstOrDefault()
-                ?? item.ExternalLinks.FirstOrDefault();
-            if (link is null)
+            var links = (item.ExternalLinks ?? Array.Empty<ExternalLink>())
+                .Where(l => !string.IsNullOrWhiteSpace(l.Provider) &&
+                            !string.Equals(l.Provider, "Shared", StringComparison.OrdinalIgnoreCase))
+                .OrderByDescending(l => l.IsMismatch)
+                .ThenByDescending(l => string.Equals(l.Provider, preferredProviderId, StringComparison.OrdinalIgnoreCase))
+                .ThenBy(l => l.Provider, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            if (links.Count == 0)
             {
                 AppDialog.Alert(Window.GetWindow(this), "This item has no linked provider.", "Diff");
                 return;
             }
 
-            var remote = await ProviderSessionService.Instance.FindRemoteEntryAsync(
-                link.Provider,
-                link.ExternalId,
-                item.Title,
-                item.Username);
+            var sources = new List<(string ProviderId, string DisplayName, ProviderEntry? Remote, bool IsMismatch)>();
+            foreach (var link in links)
+            {
+                var remote = await ProviderSessionService.Instance.FindRemoteEntryAsync(
+                    link.Provider,
+                    link.ExternalId,
+                    item.Title,
+                    item.Username);
+                var display = VaultProviderCatalog.CreateAll()
+                    .FirstOrDefault(p => string.Equals(p.ProviderId, link.Provider, StringComparison.OrdinalIgnoreCase))
+                    ?.DisplayName ?? link.Provider;
+                sources.Add((link.Provider, display, remote, link.IsMismatch));
+            }
 
-            var win = new DiffMatchWindow(item, remote, link.Provider) { Owner = Window.GetWindow(this) };
+            var win = new DiffMatchWindow(item, sources) { Owner = Window.GetWindow(this) };
             if (win.ShowDialog() == true)
                 await ReloadAsync();
         }
@@ -1385,8 +1729,16 @@ public sealed class VaultGroupHeader
 public sealed class VaultListTemplateSelector : DataTemplateSelector
 {
     public DataTemplate? ItemTemplate { get; set; }
+    public DataTemplate? ConflictItemTemplate { get; set; }
     public DataTemplate? HeaderTemplate { get; set; }
+    public bool UseConflictTemplate { get; set; }
 
     public override DataTemplate? SelectTemplate(object item, DependencyObject container)
-        => item is VaultGroupHeader ? HeaderTemplate : ItemTemplate;
+    {
+        if (item is VaultGroupHeader)
+            return HeaderTemplate;
+        if (UseConflictTemplate)
+            return ConflictItemTemplate ?? ItemTemplate;
+        return ItemTemplate;
+    }
 }

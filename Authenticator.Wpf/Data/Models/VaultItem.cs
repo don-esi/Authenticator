@@ -32,7 +32,7 @@ public class VaultItem
     /// <summary>Encrypted password / secret.</summary>
     public string? Password { get; set; }
 
-    [MaxLength(1000)]
+    /// <summary>Login URL — nvarchar(max); LastPass OAuth/state URLs routinely exceed 1000 chars.</summary>
     public string? Url { get; set; }
 
     public int? LinkedAccountId { get; set; }

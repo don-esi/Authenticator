@@ -34,6 +34,11 @@ public sealed class ProviderConnectRequest
     public string? KeyFilePath { get; set; }
     /// <summary>Stable device/client id for cloud providers (e.g. LastPass).</summary>
     public string? ClientId { get; set; }
+    /// <summary>
+    /// Interactive LastPass MFA UI (WealthForge-style). When null, MFA is cancelled
+    /// (silent reconnect path relying on device trust).
+    /// </summary>
+    public PasswordManager.LastPass.Ui.IAsyncUi? LastPassUi { get; set; }
 }
 
 public interface IVaultProvider

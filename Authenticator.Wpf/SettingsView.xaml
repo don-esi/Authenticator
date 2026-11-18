@@ -258,6 +258,41 @@
 						<TextBlock x:Name="TransferStatus" Margin="0,12,0,0" Foreground="{DynamicResource PrimaryTextBrush}" TextWrapping="Wrap" />
 					</StackPanel>
 				</syncfusion:GroupBarItem>
+
+				<syncfusion:GroupBarItem HeaderText="Developer">
+					<StackPanel Margin="8">
+						<TextBlock Margin="0,0,0,12" Foreground="{DynamicResource SecondaryTextBrush}" TextWrapping="Wrap"
+							Text="Debug tools for Shared vault import/reconcile testing. Purge deletes vault logins, provider links, and the Conflicts list — 2FA accounts, unlock methods, and provider Connect credentials are kept." />
+						<Grid Margin="0,0,0,12">
+							<Grid.ColumnDefinitions>
+								<ColumnDefinition Width="*" />
+								<ColumnDefinition Width="Auto" />
+							</Grid.ColumnDefinitions>
+							<TextBlock VerticalAlignment="Center" Foreground="{DynamicResource PrimaryTextBrush}" Text="Developer mode" />
+							<ToggleButton x:Name="DeveloperModeToggle"
+								Grid.Column="1"
+								VerticalAlignment="Center"
+								Style="{StaticResource SwitchToggle}"
+								Checked="DeveloperMode_Changed"
+								Unchecked="DeveloperMode_Changed"
+								AutomationProperties.Name="Developer mode" />
+						</Grid>
+						<StackPanel x:Name="DeveloperActionsPanel" Visibility="Collapsed">
+							<syncfusion:ButtonAdv
+								x:Name="PurgeVaultButton"
+								Margin="0,0,0,8"
+								Label="Purge Shared vault items"
+								Click="PurgeVault_Click"
+								SizeMode="Normal"
+								Background="{DynamicResource DangerBrush}"
+								Foreground="White"
+								AutomationProperties.Name="Purge Shared vault items" />
+							<TextBlock x:Name="DeveloperStatus"
+								Foreground="{DynamicResource SecondaryTextBrush}"
+								TextWrapping="Wrap" />
+						</StackPanel>
+					</StackPanel>
+				</syncfusion:GroupBarItem>
 			</syncfusion:GroupBar>
 		</ScrollViewer>
 	</DockPanel>

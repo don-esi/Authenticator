@@ -13,6 +13,8 @@ public enum ProviderDialogMode
 /// <summary>
 /// Live provider sessions + DPAPI-backed "Connect to" retention.
 /// Import-from never writes the store; Connect-to does.
+/// Connect is all-or-nothing for the current attempt: any exception tears down the live
+/// session and does not leave a new saved connection (so restart stays disconnected).
 /// </summary>
 public sealed class ProviderSessionService
 {
@@ -67,27 +69,50 @@ public sealed class ProviderSessionService
             : request.ClientId;
         request.ClientId = clientId;
 
-        await provider.ConnectAsync(request, ct);
-        RememberLive(provider);
+        // Preserve client id across attempts, but do not keep a saved row unless this attempt fully succeeds.
+        var preservedClientId = clientId;
 
-        _store.Upsert(new ProviderConnectionRecord
+        try
         {
-            ProviderId = provider.ProviderId,
-            DisplayName = provider.DisplayName,
-            Username = request.Username,
-            Password = request.Password,
-            FilePath = request.FilePath,
-            KeyFilePath = request.KeyFilePath,
-            ClientId = clientId,
-            ConnectedAtUtc = DateTime.UtcNow
-        });
-        ConnectionsChanged?.Invoke(this, EventArgs.Empty);
+            await provider.ConnectAsync(request, ct);
+            RememberLive(provider);
 
-        int? imported = null;
-        if (importAfterConnect)
-            imported = await new VaultImportService().BulkImportAsync(provider, ct);
+            int? imported = null;
+            if (importAfterConnect)
+            {
+                // Off UI thread so the busy spinner can animate; each Save uses its own DbContext.
+                imported = await Task.Run(
+                    async () => await new VaultImportService().BulkImportAsync(provider, ct).ConfigureAwait(false),
+                    ct).ConfigureAwait(true);
+            }
 
-        return (provider, imported);
+            // Persist only after login (+ optional import) fully succeeds.
+            _store.Upsert(new ProviderConnectionRecord
+            {
+                ProviderId = provider.ProviderId,
+                DisplayName = provider.DisplayName,
+                Username = request.Username,
+                Password = request.Password,
+                FilePath = request.FilePath,
+                KeyFilePath = request.KeyFilePath,
+                ClientId = preservedClientId,
+                ConnectedAtUtc = DateTime.UtcNow
+            });
+            ConnectionsChanged?.Invoke(this, EventArgs.Empty);
+            LoggingConfiguration.LogInfo(
+                $"Connected and saved {provider.ProviderId} (importAfter={importAfterConnect}, imported={imported}).",
+                nameof(ProviderSessionService));
+            return (provider, imported);
+        }
+        catch (Exception ex)
+        {
+            LoggingConfiguration.LogException(
+                ex,
+                $"Connect aborted for {provider.ProviderId}; not connected.",
+                nameof(ProviderSessionService));
+            AbortFailedConnectAttempt(provider);
+            throw;
+        }
     }
 
     public async Task<(IVaultProvider Provider, int ImportedCount)> ImportOnceAsync(
@@ -98,10 +123,29 @@ public sealed class ProviderSessionService
         ArgumentNullException.ThrowIfNull(provider);
         // Ephemeral client id — do not touch the connection store.
         request.ClientId ??= Guid.NewGuid().ToString("N");
-        await provider.ConnectAsync(request, ct);
-        var count = await new VaultImportService().BulkImportAsync(provider, ct);
-        provider.Disconnect();
-        return (provider, count);
+        try
+        {
+            await provider.ConnectAsync(request, ct);
+            var count = await Task.Run(
+                async () => await new VaultImportService().BulkImportAsync(provider, ct).ConfigureAwait(false),
+                ct).ConfigureAwait(true);
+            return (provider, count);
+        }
+        finally
+        {
+            provider.Disconnect();
+        }
+    }
+
+    /// <summary>
+    /// Exception during Connect ⇒ not connected: drop live session and saved row for this provider.
+    /// </summary>
+    private void AbortFailedConnectAttempt(IVaultProvider provider)
+    {
+        // Disconnect clears live + DPAPI row so restart will not show connected.
+        Disconnect(provider.ProviderId);
+        if (provider.IsConnected)
+            provider.Disconnect();
     }
 
     public void Disconnect(string providerId)
@@ -128,6 +172,13 @@ public sealed class ProviderSessionService
             _live.Clear();
             _remoteCache.Clear();
         }
+    }
+
+    /// <summary>Clears Diff/reconcile remote entry cache (e.g. after developer vault purge).</summary>
+    public void ClearRemoteCache()
+    {
+        lock (_gate)
+            _remoteCache.Clear();
     }
 
     public static string NormalizeExternalId(string? externalId)
@@ -335,6 +386,27 @@ public sealed class ProviderSessionService
             Unchanged = scan.Unchanged,
             Conflicts = scan.Conflicts
         };
+    }
+
+    /// <summary>
+    /// Ensure every saved provider is live, import missing entries, then hash-diff Shared vs provider (reconcile).
+    /// </summary>
+    public async Task<VaultSyncResult> ReconcileAllProvidersAsync(CancellationToken ct = default)
+    {
+        foreach (var conn in SavedConnections.ToList())
+        {
+            ct.ThrowIfCancellationRequested();
+            await EnsureConnectedAsync(conn.ProviderId, ct);
+        }
+
+        return await SyncAllConnectedAsync(ct);
+    }
+
+    /// <summary>Ensure one saved provider is live, import missing, then conflict-scan (reconcile).</summary>
+    public async Task<VaultSyncResult> ReconcileProviderAsync(string providerId, CancellationToken ct = default)
+    {
+        await EnsureConnectedAsync(providerId, ct);
+        return await SyncProviderAsync(providerId, ct);
     }
 
     /// <summary>Reconnects a saved provider without importing/reconciling.</summary>
