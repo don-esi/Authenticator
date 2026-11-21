@@ -50,7 +50,7 @@ public sealed class VaultImportService
                 var item = await _items.GetByIdAsync(originId, ct) ?? new VaultItem { Id = originId };
                 var mismatch = SoftMerge(item, entry, provider.Capabilities.SupportsFavorites);
                 item.IsDeleted = false;
-                await _items.SaveAsync(item, ct);
+                await _items.SaveAsync(item, ct, touchModifiedAt: false);
                 await UpsertLinkAsync(item.Id, provider.ProviderId, entry.ExternalId, LinkHash(item), mismatch, ct);
                 IndexItem(indexes, item);
                 imported++;
@@ -66,7 +66,7 @@ public sealed class VaultImportService
                 {
                     var mismatch = SoftMerge(existing, entry, provider.Capabilities.SupportsFavorites);
                     existing.IsDeleted = false;
-                    await _items.SaveAsync(existing, ct);
+                    await _items.SaveAsync(existing, ct, touchModifiedAt: false);
                     await UpsertLinkAsync(vaultId, provider.ProviderId, entry.ExternalId, LinkHash(existing), mismatch, ct);
                     IndexItem(indexes, existing);
                     linkedExisting++;
@@ -77,7 +77,7 @@ public sealed class VaultImportService
             var created = new VaultItem { Id = Guid.NewGuid() };
             ApplyEntry(created, entry, provider.Capabilities.SupportsFavorites);
             created.IsDeleted = false;
-            await _items.SaveAsync(created, ct);
+            await _items.SaveAsync(created, ct, touchModifiedAt: false);
             await UpsertLinkAsync(created.Id, provider.ProviderId, entry.ExternalId, LinkHash(created), mismatch: false, ct);
             IndexItem(indexes, created);
             imported++;
@@ -131,7 +131,7 @@ public sealed class VaultImportService
                 {
                     var mismatch = SoftMerge(existing, entry, provider.Capabilities.SupportsFavorites);
                     existing.IsDeleted = false;
-                    await _items.SaveAsync(existing, ct);
+                    await _items.SaveAsync(existing, ct, touchModifiedAt: false);
                     await UpsertLinkAsync(vaultId, provider.ProviderId, entry.ExternalId, LinkHash(existing), mismatch, ct);
                     IndexItem(indexes, existing);
                     linkedExisting++;
@@ -142,7 +142,7 @@ public sealed class VaultImportService
             var item = new VaultItem { Id = Guid.NewGuid() };
             ApplyEntry(item, entry, provider.Capabilities.SupportsFavorites);
             item.IsDeleted = false;
-            await _items.SaveAsync(item, ct);
+            await _items.SaveAsync(item, ct, touchModifiedAt: false);
             await UpsertLinkAsync(item.Id, provider.ProviderId, entry.ExternalId, LinkHash(item), mismatch: false, ct);
             IndexItem(indexes, item);
             imported++;
@@ -162,7 +162,7 @@ public sealed class VaultImportService
         if (!provider.IsConnected)
             throw new InvalidOperationException($"{provider.DisplayName} is not connected.");
 
-        var entries = await provider.ListEntriesAsync(ct);
+        var entries = (await provider.ListEntriesAsync(ct)).ToList();
         ProviderSessionService.Instance.CacheRemoteEntries(provider.ProviderId, entries);
 
         var result = new VaultSyncResult();
@@ -183,7 +183,8 @@ public sealed class VaultImportService
                 local.Password = plain;
 
             var mismatch = SoftMerge(local, entry, provider.Capabilities.SupportsFavorites);
-            await _items.SaveAsync(local, ct);
+            // Keep origin Created/Updated — do not stamp import/scan time (breaks Diff "newer").
+            await _items.SaveAsync(local, ct, touchModifiedAt: false);
 
             if (mismatch)
             {
@@ -215,6 +216,7 @@ public sealed class VaultImportService
         item.TotpSecret = string.IsNullOrWhiteSpace(entry.Totp) ? item.TotpSecret : entry.Totp;
         if (syncFavorites)
             item.IsFavorite = entry.IsFavorite;
+        ApplyOriginTimestamps(item, entry, force: true);
     }
 
     /// <summary>
@@ -243,6 +245,9 @@ public sealed class VaultImportService
         if (syncFavorites && !vault.IsFavorite && entry.IsFavorite)
             vault.IsFavorite = true;
 
+        // Repair import-stamped vault times so Diff "newer" can compare real origin dates.
+        ApplyOriginTimestamps(vault, entry, force: false);
+
         var vaultPwd = PlainPassword(vault.Password);
         var remotePwd = PlainPassword(entry.Password);
         if (string.IsNullOrEmpty(vaultPwd) && !string.IsNullOrEmpty(remotePwd))
@@ -255,6 +260,65 @@ public sealed class VaultImportService
             return false;
 
         return !string.Equals(vaultPwd, remotePwd, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Copy provider Created/Updated onto the vault row.
+    /// <paramref name="force"/> (new import) always prefers provider times when present.
+    /// Otherwise only rewrite when vault times look like an import stamp (Created≈Modified, after provider).
+    /// </summary>
+    private static void ApplyOriginTimestamps(VaultItem vault, ProviderEntry entry, bool force)
+    {
+        var providerCreated = ToUtc(entry.CreatedAt);
+        var providerModified = ToUtc(entry.ModifiedAt) ?? providerCreated;
+
+        if (providerCreated is DateTime pc &&
+            (force || vault.CreatedAt == default || vault.CreatedAt > pc))
+            vault.CreatedAt = pc;
+
+        if (providerModified is null)
+            return;
+
+        var pm = providerModified.Value;
+        if (force || vault.ModifiedAt is null || vault.ModifiedAt == default)
+        {
+            vault.ModifiedAt = pm;
+            return;
+        }
+
+        if (!LooksLikeImportStamp(vault, pm))
+            return;
+
+        vault.ModifiedAt = pm;
+        if (providerCreated is DateTime created && vault.CreatedAt > created)
+            vault.CreatedAt = created;
+    }
+
+    /// <summary>
+    /// Vault Created≈Modified and both clearly after the provider content time → import stamp, not a real edit.
+    /// </summary>
+    private static bool LooksLikeImportStamp(VaultItem vault, DateTime providerModifiedUtc)
+    {
+        if (vault.ModifiedAt is not DateTime vaultMod)
+            return false;
+        var created = vault.CreatedAt;
+        if (created == default)
+            return false;
+        if (Math.Abs((vaultMod - created).TotalSeconds) > 5)
+            return false;
+        return vaultMod > providerModifiedUtc.AddMinutes(1);
+    }
+
+    private static DateTime? ToUtc(DateTime? value)
+    {
+        if (value is null || value == default)
+            return null;
+        return value.Value.Kind switch
+        {
+            DateTimeKind.Utc => value.Value,
+            DateTimeKind.Local => value.Value.ToUniversalTime(),
+            _ => DateTime.SpecifyKind(value.Value, DateTimeKind.Utc)
+        };
     }
 
     private static string PlainPassword(string? stored)
@@ -470,7 +534,10 @@ public sealed class VaultImportService
 
             try
             {
-                await provider.UpdateEntryAsync(ToProviderEntry(item, originId), ct);
+                var pushed = ToProviderEntry(item, originId);
+                await provider.UpdateEntryAsync(pushed, ct);
+                // Keep Diff/scan cache aligned so a post-Apply reload does not re-flag this row.
+                ProviderSessionService.Instance.CacheRemoteEntry(link.Provider, pushed);
                 await UpsertLinkAsync(item.Id, link.Provider, originId, hash, mismatch: false, ct);
                 result.Updated++;
                 LoggingConfiguration.LogInfo(

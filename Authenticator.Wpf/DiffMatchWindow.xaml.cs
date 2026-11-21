@@ -21,6 +21,8 @@ public partial class DiffMatchWindow : Window
     private static readonly Brush MatchGreenBorder = Freeze(new SolidColorBrush(Color.FromRgb(0x22, 0xC5, 0x5E)));
     private static readonly Brush DiffAmberFill = Freeze(new SolidColorBrush(Color.FromArgb(0x30, 0xF5, 0x9E, 0x0B)));
     private static readonly Brush DiffAmberBorder = Freeze(new SolidColorBrush(Color.FromRgb(0xD9, 0x77, 0x06)));
+    private static readonly Brush NewerSkyFill = Freeze(new SolidColorBrush(Color.FromArgb(0x28, 0x0E, 0xA5, 0xE9)));
+    private static readonly Brush NewerSkyBorder = Freeze(new SolidColorBrush(Color.FromRgb(0x02, 0x84, 0xC7)));
 
     private static Brush Freeze(SolidColorBrush brush)
     {
@@ -261,6 +263,7 @@ public partial class DiffMatchWindow : Window
     private UIElement BuildSourceHeader(DiffSource source)
     {
         var matchState = GetSourceMatchState(source);
+        var isNewer = IsNewestSource(source);
         var panel = new StackPanel { Margin = new Thickness(0, 0, 8, 10) };
 
         var chrome = new Border
@@ -268,19 +271,23 @@ public partial class DiffMatchWindow : Window
             CornerRadius = new CornerRadius(10),
             Padding = new Thickness(10, 8, 10, 8),
             Margin = new Thickness(0, 0, 0, 8),
-            BorderThickness = new Thickness(1.5),
-            Background = matchState switch
-            {
-                SourceMatchState.MatchesVault => MatchGreenFill,
-                SourceMatchState.Differs => DiffAmberFill,
-                _ => (Brush)FindResource("SecondaryBackgroundBrush")
-            },
-            BorderBrush = matchState switch
-            {
-                SourceMatchState.MatchesVault => MatchGreenBorder,
-                SourceMatchState.Differs => DiffAmberBorder,
-                _ => (Brush)FindResource("BorderBrushColor")
-            }
+            BorderThickness = new Thickness(isNewer ? 2 : 1.5),
+            Background = isNewer
+                ? NewerSkyFill
+                : matchState switch
+                {
+                    SourceMatchState.MatchesVault => MatchGreenFill,
+                    SourceMatchState.Differs => DiffAmberFill,
+                    _ => (Brush)FindResource("SecondaryBackgroundBrush")
+                },
+            BorderBrush = isNewer
+                ? NewerSkyBorder
+                : matchState switch
+                {
+                    SourceMatchState.MatchesVault => MatchGreenBorder,
+                    SourceMatchState.Differs => DiffAmberBorder,
+                    _ => (Brush)FindResource("BorderBrushColor")
+                }
         };
         _sourceHeaderChrome[source.Id] = chrome;
 
@@ -291,6 +298,19 @@ public partial class DiffMatchWindow : Window
             FontWeight = FontWeights.SemiBold,
             FontSize = 15
         });
+        if (isNewer)
+        {
+            titleRow.Children.Add(new TextBlock
+            {
+                Text = "This one is newer",
+                FontSize = 12,
+                FontWeight = FontWeights.SemiBold,
+                Margin = new Thickness(0, 2, 0, 0),
+                Foreground = NewerSkyBorder,
+                ToolTip = "Based on Updated (or Created) across sources"
+            });
+        }
+
         titleRow.Children.Add(new TextBlock
         {
             Text = matchState switch
@@ -416,7 +436,9 @@ public partial class DiffMatchWindow : Window
             MinHeight = 36,
             Opacity = source.Unavailable ? 0.55 : 1,
             ToolTip = infoOnly
-                ? "Informational only — not used for match or Apply"
+                ? (IsNewestSource(source)
+                    ? "This source is newer (Updated/Created) — informational only"
+                    : "Informational only — not used for match or Apply")
                 : source.Unavailable
                     ? "Reconnect provider to compare"
                     : source.IsVault && IsEditableVaultField(field)
@@ -652,6 +674,7 @@ public partial class DiffMatchWindow : Window
         var neutralBg = (Brush)FindResource("SecondaryBackgroundBrush");
         var neutralBorder = (Brush)FindResource("BorderBrushColor");
         var vault = _sources.First(s => s.IsVault);
+        var newestId = FindNewestSourceId();
 
         foreach (var ((field, sourceId), cell) in _cells)
         {
@@ -661,13 +684,29 @@ public partial class DiffMatchWindow : Window
             var matchesVault = !IsInfoField(field) &&
                                (source.IsVault || FieldEquals(field, source, vault));
             var rowDiffers = !IsInfoField(field) && FieldRowDiffers(field);
+            var isNewerSource = newestId is not null &&
+                                string.Equals(sourceId, newestId, StringComparison.OrdinalIgnoreCase);
 
             if (IsInfoField(field))
             {
-                // Timestamps are informational only — no match/selection chrome.
-                cell.Background = neutralBg;
-                cell.BorderBrush = neutralBorder;
-                cell.BorderThickness = new Thickness(1);
+                // Timestamps stay non-selectable; sky chrome marks the newest source.
+                if (isNewerSource && field == "Updated")
+                {
+                    cell.Background = NewerSkyFill;
+                    cell.BorderBrush = NewerSkyBorder;
+                    cell.BorderThickness = new Thickness(2);
+                    cell.ToolTip = "This one is newer";
+                }
+                else
+                {
+                    cell.Background = neutralBg;
+                    cell.BorderBrush = neutralBorder;
+                    cell.BorderThickness = new Thickness(1);
+                    cell.ToolTip = isNewerSource
+                        ? "This source is newer (see Updated) — informational only"
+                        : "Informational only — not used for match or Apply";
+                }
+
                 continue;
             }
 
@@ -699,6 +738,59 @@ public partial class DiffMatchWindow : Window
                 ? DiffAmberBorder
                 : (Brush)FindResource("SecondaryTextBrush");
         }
+    }
+
+    /// <summary>
+    /// Source with the latest Updated (else Created). Null when fewer than two dated sources
+    /// or a tie for newest.
+    /// </summary>
+    private string? FindNewestSourceId()
+    {
+        DiffSource? best = null;
+        DateTime? bestUtc = null;
+        var dated = 0;
+
+        foreach (var source in _sources)
+        {
+            if (source.Unavailable)
+                continue;
+            var utc = EffectiveTimestampUtc(source);
+            if (utc is null)
+                continue;
+            dated++;
+            if (bestUtc is null || utc > bestUtc)
+            {
+                bestUtc = utc;
+                best = source;
+            }
+            else if (utc == bestUtc)
+            {
+                // Tie for newest — don't claim a single winner.
+                best = null;
+            }
+        }
+
+        return dated >= 2 ? best?.Id : null;
+    }
+
+    private bool IsNewestSource(DiffSource source)
+    {
+        var newestId = FindNewestSourceId();
+        return newestId is not null &&
+               string.Equals(source.Id, newestId, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static DateTime? EffectiveTimestampUtc(DiffSource source)
+    {
+        var raw = source.ModifiedAt ?? source.CreatedAt;
+        if (raw is null || raw == default)
+            return null;
+        return raw.Value.Kind switch
+        {
+            DateTimeKind.Utc => raw.Value,
+            DateTimeKind.Local => raw.Value.ToUniversalTime(),
+            _ => DateTime.SpecifyKind(raw.Value, DateTimeKind.Utc)
+        };
     }
 
     private bool FieldRowDiffers(string field)
@@ -827,12 +919,17 @@ public partial class DiffMatchWindow : Window
 
     private async void Apply_Click(object sender, RoutedEventArgs e)
     {
-        var push = AppDialog.Confirm(
+        var choice = AppDialog.Choose(
             this,
-            "Apply selections to the vault?\n\nChoose Update all to also push the vault values to linked providers.",
+            "Apply selections to the vault?\n\nUpdate all also pushes the vault values to linked providers.",
             "Apply to vault",
-            confirmText: "Update all",
-            cancelText: "Vault only");
+            primaryText: "Update all",
+            secondaryText: "Vault only",
+            cancelText: "Cancel");
+        if (choice == AppDialogChoice.Cancel)
+            return;
+
+        var push = choice == AppDialogChoice.Primary;
 
         try
         {
@@ -844,8 +941,9 @@ public partial class DiffMatchWindow : Window
             await _vaultItems.SaveAsync(_item);
             await _import.ClearMismatchesForItemAsync(_item.Id);
 
+            VaultPushResult? pushResult = null;
             if (push)
-                await _import.PushToLinkedProvidersAsync(_item);
+                pushResult = await _import.PushToLinkedProvidersAsync(_item);
 
             var providerIds = _sources
                 .Where(s => !s.IsVault)
@@ -857,6 +955,22 @@ public partial class DiffMatchWindow : Window
                 new Dictionary<string, string>(_fieldSource, StringComparer.OrdinalIgnoreCase),
                 pushedToProviders: push,
                 providerIds);
+
+            if (pushResult is { } pr && (pr.Failed > 0 || pr.Skipped > 0 || pr.Messages.Count > 0))
+            {
+                var lines = new List<string>
+                {
+                    push
+                        ? $"Vault updated. Providers: {pr.Updated} updated, {pr.Skipped} skipped, {pr.Failed} failed."
+                        : "Vault updated."
+                };
+                lines.AddRange(pr.Messages.Take(8));
+                AppDialog.Alert(
+                    this,
+                    string.Join("\n", lines),
+                    "Apply",
+                    pr.Failed > 0 ? AppDialogKind.Warning : AppDialogKind.Info);
+            }
 
             DialogResult = true;
             Close();

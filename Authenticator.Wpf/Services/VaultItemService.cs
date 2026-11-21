@@ -138,11 +138,21 @@ public sealed class VaultItemService
         return index;
     }
 
-    public async Task<VaultItem> SaveAsync(VaultItem item, CancellationToken ct = default)
+    /// <param name="touchModifiedAt">
+    /// When true (edits / Diff Apply), bump <see cref="VaultItem.ModifiedAt"/> to now.
+    /// When false (import / soft-merge scan), keep provider origin timestamps on the item.
+    /// </param>
+    public async Task<VaultItem> SaveAsync(
+        VaultItem item,
+        CancellationToken ct = default,
+        bool touchModifiedAt = true)
     {
         ArgumentNullException.ThrowIfNull(item);
         if (item.Id == Guid.Empty) item.Id = Guid.NewGuid();
-        item.ModifiedAt = DateTime.UtcNow;
+        if (touchModifiedAt)
+            item.ModifiedAt = DateTime.UtcNow;
+        else if (item.ModifiedAt is null || item.ModifiedAt == default)
+            item.ModifiedAt = item.CreatedAt == default ? DateTime.UtcNow : item.CreatedAt;
 
         if (ConnectionConfig.IsOfflineMode)
         {

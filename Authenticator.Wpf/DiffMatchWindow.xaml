@@ -51,7 +51,7 @@
 				Foreground="{DynamicResource SecondaryTextBrush}"
 				TextWrapping="Wrap"
 				MaxWidth="720"
-				Text="Green = matches vault · Amber = differs · Click to pick · Slow second click on Vault to edit · Created/Updated info only" />
+				Text="Green = matches vault · Amber = differs · Sky = newer timestamp · Click to pick · Slow second click on Vault to edit" />
 		</StackPanel>
 
 		<ScrollViewer Grid.Row="2"

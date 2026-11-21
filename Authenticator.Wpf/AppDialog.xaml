@@ -64,6 +64,14 @@
 
 		<Border Grid.Row="2" Style="{StaticResource DialogFooter}">
 			<StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+				<Button x:Name="CancelButton"
+					Content="Cancel"
+					Margin="0,0,8,0"
+					Style="{StaticResource SecondaryButton}"
+					Visibility="Collapsed"
+					IsCancel="True"
+					Click="Cancel_Click"
+					AutomationProperties.Name="Cancel" />
 				<Button x:Name="SecondaryButton"
 					Content="Cancel"
 					Margin="0,0,8,0"

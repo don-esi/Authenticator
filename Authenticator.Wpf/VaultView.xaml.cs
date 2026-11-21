@@ -988,7 +988,7 @@ public partial class VaultView : UserControl
     {
         var win = new ReconcileHistoryWindow { Owner = Window.GetWindow(this) };
         if (win.ShowDialog() == true)
-            _ = ReloadAsync();
+            _ = ReloadAfterReconcileAsync();
     }
 
     private static MenuItem MakeMenu(string header, Action action)
@@ -1505,12 +1505,33 @@ public partial class VaultView : UserControl
 
             var win = new DiffMatchWindow(item, sources) { Owner = Window.GetWindow(this) };
             if (win.ShowDialog() == true)
-                await ReloadAsync();
+                await ReloadAfterReconcileAsync();
         }
         catch (Exception ex)
         {
             LoggingConfiguration.LogException(ex, $"Failed to open Diff for {row.Id}.", nameof(VaultView));
             AppDialog.Alert(Window.GetWindow(this), ex.Message, "Diff", AppDialogKind.Warning);
+        }
+    }
+
+    /// <summary>
+    /// After Diff Apply / history undo: refresh the list without immediately re-scanning
+    /// providers (that would re-flag the just-cleared conflict when vault-only was chosen).
+    /// </summary>
+    private async Task ReloadAfterReconcileAsync()
+    {
+        _skipConflictScanOnReload = true;
+        try
+        {
+            await ReloadAsync();
+            var remaining = _allRowsView.Count(r => r.HasMismatch);
+            ShowStatusToast(remaining > 0
+                ? $"Reconcile applied · {remaining} conflict(s) left"
+                : "Reconcile applied");
+        }
+        finally
+        {
+            _skipConflictScanOnReload = false;
         }
     }
 

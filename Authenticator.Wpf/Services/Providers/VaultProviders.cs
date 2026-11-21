@@ -25,8 +25,14 @@ internal abstract class MemoryVaultProvider : IVaultProvider
         _entries = new();
     }
 
-    public Task<IReadOnlyList<ProviderEntry>> ListEntriesAsync(CancellationToken ct = default) =>
-        Task.FromResult<IReadOnlyList<ProviderEntry>>(IsConnected ? _entries : Array.Empty<ProviderEntry>());
+    public Task<IReadOnlyList<ProviderEntry>> ListEntriesAsync(CancellationToken ct = default)
+    {
+        // Snapshot — concurrent UpdateMemoryEntry (Diff push) must not invalidate enumerators.
+        IReadOnlyList<ProviderEntry> snapshot = IsConnected
+            ? _entries.ToList()
+            : Array.Empty<ProviderEntry>();
+        return Task.FromResult(snapshot);
+    }
 
     public virtual Task UpdateEntryAsync(ProviderEntry entry, CancellationToken ct = default)
     {

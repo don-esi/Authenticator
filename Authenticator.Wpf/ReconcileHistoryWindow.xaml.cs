@@ -52,13 +52,18 @@ public partial class ReconcileHistoryWindow : Window
         if (sender is not Button { Tag: Guid historyId })
             return;
 
-        var push = AppDialog.Confirm(
+        var choice = AppDialog.Choose(
             this,
             "Restore the vault snapshot from before that Apply?\n\n" +
-            "Choose Update all to also push the restored values to linked providers.",
+            "Update all also pushes the restored values to linked providers.",
             "Undo reconcile",
-            confirmText: "Update all",
-            cancelText: "Vault only");
+            primaryText: "Update all",
+            secondaryText: "Vault only",
+            cancelText: "Cancel");
+        if (choice == AppDialogChoice.Cancel)
+            return;
+
+        var push = choice == AppDialogChoice.Primary;
 
         try
         {

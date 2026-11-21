@@ -1,5 +1,4 @@
 using Authenticator.Data.Models;
-using Authenticator.Logging;
 using Microsoft.EntityFrameworkCore;
 
 namespace Authenticator.Data;
@@ -42,9 +41,6 @@ public partial class AuthenticatorDbContext : DbContext
 
         var cs = _connectionString ?? ConnectionString;
         optionsBuilder.UseSqlServer(cs);
-        LoggingConfiguration.LogDebug(
-            $"DbContext configured for SQL Server {ConnectionConfig.Server}, database {ConnectionConfig.Database}.",
-            nameof(AuthenticatorDbContext));
     }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)

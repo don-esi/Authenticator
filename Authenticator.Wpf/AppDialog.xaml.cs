@@ -1,4 +1,5 @@
 using System.Windows;
+using System.Windows.Automation;
 using System.Windows.Media;
 
 namespace Authenticator;
@@ -15,12 +16,23 @@ public enum AppDialogButtons
 {
     Ok,
     OkCancel,
-    YesNo
+    YesNo,
+    /// <summary>Primary / Secondary / Cancel (Escape or X = Cancel).</summary>
+    ThreeWay
+}
+
+public enum AppDialogChoice
+{
+    Cancel,
+    Secondary,
+    Primary
 }
 
 public partial class AppDialog : Window
 {
     private bool _accepted;
+    private AppDialogChoice _choice = AppDialogChoice.Cancel;
+    private readonly AppDialogButtons _buttons;
 
     private AppDialog(
         string title,
@@ -28,14 +40,16 @@ public partial class AppDialog : Window
         AppDialogKind kind,
         AppDialogButtons buttons,
         string? primaryText,
-        string? secondaryText)
+        string? secondaryText,
+        string? cancelText = null)
     {
         InitializeComponent();
+        _buttons = buttons;
         Title = title;
         TitleText.Text = title;
         MessageText.Text = message;
         ApplyKind(kind);
-        ApplyButtons(buttons, primaryText, secondaryText);
+        ApplyButtons(buttons, primaryText, secondaryText, cancelText);
     }
 
     public static void Alert(
@@ -77,6 +91,32 @@ public partial class AppDialog : Window
         var dialog = new AppDialog(title, message, kind, AppDialogButtons.YesNo, "Yes", "No");
         AssignOwner(dialog, owner);
         return dialog.ShowDialog() == true;
+    }
+
+    /// <summary>
+    /// Three-way confirm. Primary / Secondary are both affirmative choices;
+    /// Cancel (button, Escape, or window X) aborts without applying.
+    /// </summary>
+    public static AppDialogChoice Choose(
+        Window? owner,
+        string message,
+        string title,
+        string primaryText,
+        string secondaryText,
+        string cancelText = "Cancel",
+        AppDialogKind kind = AppDialogKind.Confirm)
+    {
+        var dialog = new AppDialog(
+            title,
+            message,
+            kind,
+            AppDialogButtons.ThreeWay,
+            primaryText,
+            secondaryText,
+            cancelText);
+        AssignOwner(dialog, owner);
+        dialog.ShowDialog();
+        return dialog._choice;
     }
 
     /// <summary>
@@ -132,8 +172,15 @@ public partial class AppDialog : Window
         }
     }
 
-    private void ApplyButtons(AppDialogButtons buttons, string? primaryText, string? secondaryText)
+    private void ApplyButtons(
+        AppDialogButtons buttons,
+        string? primaryText,
+        string? secondaryText,
+        string? cancelText)
     {
+        CancelButton.Visibility = Visibility.Collapsed;
+        SecondaryButton.IsCancel = true;
+
         switch (buttons)
         {
             case AppDialogButtons.Ok:
@@ -143,20 +190,36 @@ public partial class AppDialog : Window
             case AppDialogButtons.YesNo:
                 SecondaryButton.Visibility = Visibility.Visible;
                 SecondaryButton.Content = string.IsNullOrWhiteSpace(secondaryText) ? "No" : secondaryText;
+                SecondaryButton.SetValue(AutomationProperties.NameProperty, SecondaryButton.Content);
                 PrimaryButton.Content = string.IsNullOrWhiteSpace(primaryText) ? "Yes" : primaryText;
+                break;
+            case AppDialogButtons.ThreeWay:
+                CancelButton.Visibility = Visibility.Visible;
+                CancelButton.Content = string.IsNullOrWhiteSpace(cancelText) ? "Cancel" : cancelText;
+                CancelButton.IsCancel = true;
+                SecondaryButton.IsCancel = false;
+                SecondaryButton.Visibility = Visibility.Visible;
+                SecondaryButton.Content = string.IsNullOrWhiteSpace(secondaryText) ? "No" : secondaryText;
+                SecondaryButton.SetValue(AutomationProperties.NameProperty, SecondaryButton.Content);
+                PrimaryButton.Content = string.IsNullOrWhiteSpace(primaryText) ? "Yes" : primaryText;
+                PrimaryButton.SetValue(AutomationProperties.NameProperty, PrimaryButton.Content);
                 break;
             default:
                 SecondaryButton.Visibility = Visibility.Visible;
                 SecondaryButton.Content = string.IsNullOrWhiteSpace(secondaryText) ? "Cancel" : secondaryText;
+                SecondaryButton.SetValue(AutomationProperties.NameProperty, SecondaryButton.Content);
                 PrimaryButton.Content = string.IsNullOrWhiteSpace(primaryText) ? "OK" : primaryText;
                 if (string.Equals(PrimaryButton.Content as string, "Delete", StringComparison.OrdinalIgnoreCase))
                     PrimaryButton.Background = (Brush)FindResource("DangerBrush");
                 break;
         }
+
+        PrimaryButton.SetValue(AutomationProperties.NameProperty, PrimaryButton.Content);
     }
 
     private void Primary_Click(object sender, RoutedEventArgs e)
     {
+        _choice = AppDialogChoice.Primary;
         _accepted = true;
         DialogResult = true;
         Close();
@@ -164,6 +227,15 @@ public partial class AppDialog : Window
 
     private void Secondary_Click(object sender, RoutedEventArgs e)
     {
+        _choice = AppDialogChoice.Secondary;
+        _accepted = false;
+        DialogResult = false;
+        Close();
+    }
+
+    private void Cancel_Click(object sender, RoutedEventArgs e)
+    {
+        _choice = AppDialogChoice.Cancel;
         _accepted = false;
         DialogResult = false;
         Close();
@@ -171,8 +243,20 @@ public partial class AppDialog : Window
 
     protected override void OnClosing(System.ComponentModel.CancelEventArgs e)
     {
-        if (DialogResult is null)
+        if (_buttons == AppDialogButtons.ThreeWay)
+        {
+            // Window X / Alt+F4 with no button click must abort, not pick Secondary.
+            if (DialogResult is null)
+            {
+                _choice = AppDialogChoice.Cancel;
+                DialogResult = false;
+            }
+        }
+        else if (DialogResult is null)
+        {
             DialogResult = _accepted;
+        }
+
         base.OnClosing(e);
     }
 }
