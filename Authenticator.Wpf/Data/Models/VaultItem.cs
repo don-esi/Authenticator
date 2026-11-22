@@ -53,6 +53,12 @@ public class VaultItem
     /// <summary>Set when the user copies credentials or auto-fills — drives Recents.</summary>
     public DateTime? LastUsedAt { get; set; }
 
+    /// <summary>When true, unique exact-domain match may auto-type username/password into the browser.</summary>
+    public bool AllowAutoFill { get; set; }
+
+    /// <summary>When true (implies fill), also activate Next/Submit/Sign-in buttons for multi-step login.</summary>
+    public bool AllowAutoLogin { get; set; }
+
     public virtual ICollection<VaultCustomField> CustomFields { get; set; } = new List<VaultCustomField>();
 
     public virtual ICollection<ExternalLink> ExternalLinks { get; set; } = new List<ExternalLink>();

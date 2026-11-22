@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.IO;
 using System.Reflection;
 using System.Text.Json;
@@ -1101,5 +1102,90 @@ public partial class SettingsView : UserControl
         }
 
         return Assembly.GetExecutingAssembly().GetName().Version?.ToString(3) ?? "1.0.0";
+    }
+
+    private static string? FindBrowserExtensionFolder()
+    {
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        for (var i = 0; i < 8 && dir is not null; i++, dir = dir.Parent)
+        {
+            var candidate = Path.Combine(dir.FullName, "Authenticator.Browser");
+            if (File.Exists(Path.Combine(candidate, "manifest.json")))
+                return candidate;
+        }
+
+        var fromSource = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "Authenticator.Browser"));
+        if (File.Exists(Path.Combine(fromSource, "manifest.json")))
+            return Path.GetFullPath(fromSource);
+
+        return null;
+    }
+
+    private void OpenBrowserExtensionFolder_Click(object sender, RoutedEventArgs e)
+    {
+        var folder = FindBrowserExtensionFolder();
+        if (folder is null)
+        {
+            BrowserExtensionStatus.Text = "Could not find Authenticator.Browser (manifest.json).";
+            return;
+        }
+
+        Process.Start(new ProcessStartInfo { FileName = folder, UseShellExecute = true });
+        BrowserExtensionStatus.Text = $"Opened {folder}";
+    }
+
+    private void CopyBrowserExtensionPath_Click(object sender, RoutedEventArgs e)
+    {
+        var folder = FindBrowserExtensionFolder();
+        if (folder is null)
+        {
+            BrowserExtensionStatus.Text = "Could not find Authenticator.Browser (manifest.json).";
+            return;
+        }
+
+        ClipboardHelper.Copy(folder);
+        BrowserExtensionStatus.Text = "Path copied — paste into Chrome Load unpacked.";
+    }
+
+    private async void RegisterNativeHost_Click(object sender, RoutedEventArgs e)
+    {
+        var folder = FindBrowserExtensionFolder();
+        if (folder is null)
+        {
+            BrowserExtensionStatus.Text = "Could not find Authenticator.Browser.";
+            return;
+        }
+
+        var script = Path.Combine(folder, "register-native-host.ps1");
+        if (!File.Exists(script))
+        {
+            BrowserExtensionStatus.Text = "register-native-host.ps1 missing.";
+            return;
+        }
+
+        try
+        {
+            BrowserExtensionStatus.Text = "Registering native host…";
+            var psi = new ProcessStartInfo
+            {
+                FileName = "powershell.exe",
+                Arguments = $"-NoProfile -ExecutionPolicy Bypass -File \"{script}\"",
+                UseShellExecute = false,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                CreateNoWindow = true
+            };
+            using var proc = Process.Start(psi) ?? throw new InvalidOperationException("Failed to start PowerShell.");
+            var output = await proc.StandardOutput.ReadToEndAsync();
+            var err = await proc.StandardError.ReadToEndAsync();
+            await proc.WaitForExitAsync();
+            BrowserExtensionStatus.Text = proc.ExitCode == 0
+                ? "Native host registered for Chrome, Edge, and Firefox."
+                : $"Register failed: {err}\n{output}";
+        }
+        catch (Exception ex)
+        {
+            BrowserExtensionStatus.Text = ex.Message;
+        }
     }
 }

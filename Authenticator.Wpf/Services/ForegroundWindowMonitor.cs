@@ -14,6 +14,10 @@ public sealed class ForegroundWindowInfo
     public string? UrlHint { get; init; }
     /// <summary>Tokens used for partial Relevant matching (hosts, app names, title words).</summary>
     public IReadOnlyList<string> MatchTerms { get; init; } = Array.Empty<string>();
+    /// <summary>Raw URL from the browser address bar (UIA), when available.</summary>
+    public string? CapturedUrl { get; init; }
+    /// <summary>Normalized host from <see cref="CapturedUrl"/>; required for autofill.</summary>
+    public string? CapturedHost { get; init; }
 }
 
 /// <summary>
@@ -104,19 +108,41 @@ public sealed class ForegroundWindowMonitor : IDisposable
         if (SelfProcesses.Contains(processName))
             return;
 
+        string? capturedUrl = null;
+        string? capturedHost = null;
+        if (BrowserProcesses.Contains(processName))
+            (capturedUrl, capturedHost) = BrowserAddressBarReader.TryRead(hwnd);
+
         var terms = BuildMatchTerms(title, processName);
+        if (!string.IsNullOrWhiteSpace(capturedHost))
+        {
+            // Prefer structured host terms when UIA succeeded.
+            var withHost = new List<string> { capturedHost! };
+            foreach (var t in terms)
+            {
+                if (!withHost.Contains(t, StringComparer.OrdinalIgnoreCase))
+                    withHost.Add(t);
+            }
+            terms = withHost;
+        }
+
         var info = new ForegroundWindowInfo
         {
             Hwnd = hwnd,
             Title = title,
             ProcessName = processName,
-            UrlHint = PickDisplayHint(terms, title, processName),
+            CapturedUrl = capturedUrl,
+            CapturedHost = capturedHost,
+            UrlHint = !string.IsNullOrWhiteSpace(capturedHost)
+                ? capturedHost
+                : PickDisplayHint(terms, title, processName),
             MatchTerms = terms
         };
 
         if (_last is not null &&
             _last.Hwnd == info.Hwnd &&
             string.Equals(_last.Title, info.Title, StringComparison.Ordinal) &&
+            string.Equals(_last.CapturedHost, info.CapturedHost, StringComparison.OrdinalIgnoreCase) &&
             SameTerms(_last.MatchTerms, info.MatchTerms))
             return;
 

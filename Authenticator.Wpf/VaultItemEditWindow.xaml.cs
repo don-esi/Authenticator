@@ -40,6 +40,9 @@ public partial class VaultItemEditWindow : Window
         TotpBox.Text = item.TotpSecret ?? "";
         LinkedBox.Text = item.LinkedAccountId?.ToString() ?? "";
         FavoriteCheck.IsChecked = item.IsFavorite;
+        AutoFillCheck.IsChecked = item.AllowAutoFill;
+        AutoLoginCheck.IsChecked = item.AllowAutoLogin;
+        SyncAutoLoginEnabled();
         UpdateLinkedSourcesSummary(item);
 
         PassMasked.PasswordChanged += (_, _) =>
@@ -59,6 +62,16 @@ public partial class VaultItemEditWindow : Window
         {
             UpdatePasswordPlaceholder();
         }
+    }
+
+    private void AutoFillCheck_Changed(object sender, RoutedEventArgs e) => SyncAutoLoginEnabled();
+
+    private void SyncAutoLoginEnabled()
+    {
+        var fillOn = AutoFillCheck.IsChecked == true;
+        AutoLoginCheck.IsEnabled = fillOn;
+        if (!fillOn)
+            AutoLoginCheck.IsChecked = false;
     }
 
     private void UpdateLinkedSourcesSummary(VaultItem item)
@@ -155,6 +168,8 @@ public partial class VaultItemEditWindow : Window
         _item.Notes = NotesBox.Text;
         _item.TotpSecret = string.IsNullOrWhiteSpace(TotpBox.Text) ? null : TotpBox.Text.Trim();
         _item.IsFavorite = FavoriteCheck.IsChecked == true;
+        _item.AllowAutoFill = AutoFillCheck.IsChecked == true;
+        _item.AllowAutoLogin = _item.AllowAutoFill && AutoLoginCheck.IsChecked == true;
         if (int.TryParse(LinkedBox.Text.Trim(), out var linked))
             _item.LinkedAccountId = linked;
         else

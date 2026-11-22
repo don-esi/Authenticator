@@ -756,36 +756,7 @@ public sealed class VaultImportService
     /// Identity host key: lowercase host, strip leading www., ignore path/query/fragment.
     /// Includes non-default port (e.g. media.zog.one:5000 vs :8123) so self-hosted apps don't collide.
     /// </summary>
-    public static string? NormalizeDomain(string? url)
-    {
-        var raw = (url ?? "").Trim();
-        if (string.IsNullOrEmpty(raw))
-            return null;
-
-        if (!raw.Contains("://", StringComparison.Ordinal))
-            raw = "https://" + raw;
-
-        if (!Uri.TryCreate(raw, UriKind.Absolute, out var uri))
-            return null;
-
-        var host = uri.IdnHost;
-        if (string.IsNullOrWhiteSpace(host))
-            host = uri.Host;
-        if (string.IsNullOrWhiteSpace(host))
-            return null;
-
-        host = host.Trim().TrimEnd('.').ToLowerInvariant();
-        if (host.StartsWith("www.", StringComparison.Ordinal))
-            host = host[4..];
-        if (string.IsNullOrEmpty(host))
-            return null;
-
-        // Keep explicit non-default ports — same host on :5000 vs :8123 are different services.
-        if (!uri.IsDefaultPort && uri.Port > 0)
-            return $"{host}:{uri.Port}";
-
-        return host;
-    }
+    public static string? NormalizeDomain(string? url) => VaultDomain.NormalizeDomain(url);
 
     private static async Task UpsertLinkAsync(
         Guid itemId,

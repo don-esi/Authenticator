@@ -1,0 +1,47 @@
+{
+  "manifest_version": 3,
+  "name": "Authenticator Vault",
+  "version": "1.0.0",
+  "description": "Auto-fill logins from the local Authenticator vault (Chrome, Edge, Firefox).",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA1tLL97coUm5ybNqwocIOe/8jlnV2kk1BzwesqRBIFtDbiJlz9w5nWtd8Uo2+FpO7rM2f+vugYmV45k+30mgVo/oLX4VZVtt2Zlw7Zuh1/dtYFZB+BILDlYwMufv6zA7TQjwnb9LTH7ltcaJ9egGO3HaaBOUtaGKcG0BlGKmxUjbJ6pdZey/hv319hl6KrnCmVa7yuG2hSHGGf2gE7Uhu+etBk+DORagwuVtfhcaaw//q9PDRuTota3ZINFaysfMnRkTf69+EYWFgUf7uPfGj3hx5XiGOVfahFwcCsCXUVEoG/a/xBqM5pC557HCBkvi6TxpzeuXXba/TwJg46s1/JQIDAQAB",
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "authenticator@local",
+      "strict_min_version": "121.0"
+    }
+  },
+  "permissions": [
+    "nativeMessaging",
+    "tabs",
+    "scripting",
+    "storage"
+  ],
+  "host_permissions": [
+    "http://*/*",
+    "https://*/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["http://*/*", "https://*/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle",
+      "all_frames": false
+    }
+  ],
+  "action": {
+    "default_title": "Authenticator Vault",
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png"
+    }
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  }
+}

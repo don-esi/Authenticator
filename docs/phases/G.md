@@ -58,6 +58,7 @@ WealthForge may mirror the same `connection.json` shape and probe protocol.
 - Interactive MFA UI for remaining cloud providers (Bitwarden/Dashlane/etc. still JSON façade; LastPass Connect/Import prompts OTP/YubiKey like WealthForge)
 - Always-on discovery helper when Host app is closed
 - Unify 2FA Folders with VaultFolders
+- **G10/G11 harden:** ranked host match for Relevant + per-entry **Auto-fill** / **Auto-login**. **Web autofill** is the Chrome/Edge/Firefox extension (`Authenticator.Browser`) via native messaging + `VaultNativePipeServer` (UIA fill abandoned for browser pages).
 - **Next cycle — Diff try-selection:** from Diff, auto-test the current field selection (open site URL in browser → auto-login/fill attempt) so the user can see whether that password/source worked before Apply
 
 ## Reconcile / consolidate (G6+)
@@ -74,7 +75,7 @@ Vault is the consolidation hub across providers (not a third silo of duplicates)
 - **Provider commit invariant**: when the user confirms **Update all linked sources** (Diff Apply or history Undo→Update all), every linked provider with `SupportsWriteBack` must receive a **real** durable write — not in-memory-only. Surface push failures in the Apply/Undo result; do not report success for a provider that only updated the live session cache.
 - **Reconcile history + undo**: `ReconcileHistory` table stores sealed pre-Apply vault snapshots (keep 20/item). Diff **History…** lists per-item applies; Vault Providers **Reconcile history…** is the global recovery list. Undo defaults to vault restore; **Update all** also pushes restored values to linked providers.
 - **Developer purge**: hard-deletes Shared vault items/links/history (verified remaining=0, SQL fallback); clears Conflicts UI; does not remove Connect credentials.
-- **Unlock**: provider `ReconnectAll` runs on a worker thread after Codes UI is shown (banner while KeePass/LastPass reconnect; does not block YubiKey/PIN unlock or freeze UI).
+- **Unlock**: password managers are **not** reconnected at unlock (keeps startup fast). They connect lazily via `EnsureConnectedAsync` on Sync / Diff / Providers → Reconnect. Browser extension native pipe (`VaultNativePipeServer`) starts on unlock and stops on lock.
 
 ## Provider connect vs import (G5+)
 

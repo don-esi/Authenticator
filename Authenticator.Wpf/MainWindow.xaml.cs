@@ -777,6 +777,7 @@ public partial class MainWindow : Window
         BackupPage.SetCodesMasked(false);
         VaultKeyService.Instance.Clear();
         ProviderSessionService.Instance.DropLiveSessions();
+        VaultNativePipeServer.Instance.Stop();
         _discovery.StopAdvertising();
         ForegroundWindowMonitor.Instance.Stop();
         PageHost.Visibility = Visibility.Collapsed;
@@ -1103,6 +1104,8 @@ public partial class MainWindow : Window
         UnlockErrorText.Text = string.Empty;
         LockOverlay.Visibility = Visibility.Collapsed;
         PageHost.Visibility = Visibility.Visible;
+        // Pipe must be up before Codes reload — extension ping hits this immediately.
+        VaultNativePipeServer.Instance.Start();
         // Defer page show/reload so lock focus teardown cannot race CodesView ReloadAsync.
         await Dispatcher.InvokeAsync(() => { }, DispatcherPriority.Background);
         ShowPage(CodesPage);
@@ -1110,37 +1113,7 @@ public partial class MainWindow : Window
         BackupPage.SetCodesMasked(false);
         await CodesPage.ReloadAsync();
         LoggingConfiguration.LogInfo("Auto-lock cleared.", nameof(MainWindow));
-
-        _ = ReconnectProvidersInBackgroundAsync();
-    }
-
-    private async Task ReconnectProvidersInBackgroundAsync()
-    {
-        if (ProviderSessionService.Instance.SavedConnections.Count == 0)
-            return;
-
-        SetReconnectBanner(true, "Reconnecting password managers…");
-        try
-        {
-            // KeePass open + LastPass fetch are CPU/IO heavy and were freezing the UI for seconds
-            // after unlock when awaited on the dispatcher thread.
-            await Task.Run(async () =>
-                    await ProviderSessionService.Instance.ReconnectAllAsync().ConfigureAwait(false))
-                .ConfigureAwait(true);
-            LoggingConfiguration.LogInfo("Background provider reconnect finished.", nameof(MainWindow));
-            SetReconnectBanner(true, "Password managers ready");
-            await Task.Delay(1200);
-        }
-        catch (Exception ex)
-        {
-            LoggingConfiguration.LogException(ex, "Background provider reconnect failed.", nameof(MainWindow));
-            SetReconnectBanner(true, "Provider reconnect failed — see Providers menu");
-            await Task.Delay(2500);
-        }
-        finally
-        {
-            SetReconnectBanner(false);
-        }
+        // Password managers reconnect lazily on Sync / Diff / Providers → Reconnect (EnsureConnectedAsync).
     }
 
     private void SetReconnectBanner(bool visible, string? message = null)

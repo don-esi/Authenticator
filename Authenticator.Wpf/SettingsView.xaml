@@ -271,6 +271,25 @@
 				</ScrollViewer>
 			</syncfusion:GroupBarItem>
 
+			<syncfusion:GroupBarItem HeaderText="Browser autofill">
+				<ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Padding="0,0,2,0">
+					<StackPanel Margin="8">
+						<TextBlock Margin="0,0,0,12" Foreground="{DynamicResource SecondaryTextBrush}" TextWrapping="Wrap"
+							Text="Web autofill requires the Authenticator extension in Chrome/Edge/Firefox. It will not appear until you Load unpacked. Enable Auto-fill on the vault login, keep Authenticator unlocked, then open the site." />
+						<TextBlock Margin="0,0,0,8" FontWeight="SemiBold" Foreground="{DynamicResource PrimaryTextBrush}" Text="Install" />
+						<TextBlock Margin="0,0,0,12" Foreground="{DynamicResource SecondaryTextBrush}" TextWrapping="Wrap"
+							Text="1) Open the extension folder below&#10;2) Chrome: chrome://extensions → Developer mode ON → Load unpacked → select that folder&#10;3) Pin “Authenticator Vault” from the puzzle menu&#10;4) Click the icon — popup should say Connected when the vault is unlocked" />
+						<syncfusion:ButtonAdv Margin="0,0,0,8" Label="Open extension folder" Click="OpenBrowserExtensionFolder_Click" SizeMode="Normal"
+							AutomationProperties.Name="Open extension folder" />
+						<syncfusion:ButtonAdv Margin="0,0,0,8" Label="Copy extension folder path" Click="CopyBrowserExtensionPath_Click" SizeMode="Normal"
+							AutomationProperties.Name="Copy extension folder path" />
+						<syncfusion:ButtonAdv Label="Register native host" Click="RegisterNativeHost_Click" SizeMode="Normal"
+							AutomationProperties.Name="Register native host" />
+						<TextBlock x:Name="BrowserExtensionStatus" Margin="0,12,0,0" Foreground="{DynamicResource SecondaryTextBrush}" TextWrapping="Wrap" />
+					</StackPanel>
+				</ScrollViewer>
+			</syncfusion:GroupBarItem>
+
 			<syncfusion:GroupBarItem HeaderText="Developer">
 				<ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Padding="0,0,2,0">
 					<StackPanel Margin="8">

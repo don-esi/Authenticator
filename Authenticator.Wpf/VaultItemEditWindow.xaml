@@ -148,8 +148,23 @@
 						<CheckBox x:Name="FavoriteCheck"
 							Content="Favorite"
 							Style="{StaticResource DialogCheck}"
-							Margin="0"
+							Margin="0,0,0,8"
 							AutomationProperties.Name="Favorite" />
+
+						<CheckBox x:Name="AutoFillCheck"
+							Content="Auto-fill"
+							Style="{StaticResource DialogCheck}"
+							Margin="0,0,0,4"
+							ToolTip="When this login uniquely matches the browser tab domain, type username and password into the page."
+							Checked="AutoFillCheck_Changed"
+							Unchecked="AutoFillCheck_Changed"
+							AutomationProperties.Name="Auto-fill" />
+						<CheckBox x:Name="AutoLoginCheck"
+							Content="Auto-login"
+							Style="{StaticResource DialogCheck}"
+							Margin="0"
+							ToolTip="Also activate Next / Continue / Sign in buttons for multi-step username then password forms."
+							AutomationProperties.Name="Auto-login" />
 					</StackPanel>
 				</Border>
 			</StackPanel>

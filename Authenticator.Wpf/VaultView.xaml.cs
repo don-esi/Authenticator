@@ -27,7 +27,7 @@ public partial class VaultView : UserControl
         Conflicts
     }
 
-    private const double SlideActionWidth = 92;
+    private const double SlideActionWidth = 184; // Edit + Delete + Fill + Login
     private const double SlideOpenThreshold = 0.45;
 
     private readonly VaultItemService _vault = new();
@@ -44,6 +44,9 @@ public partial class VaultView : UserControl
     private readonly HashSet<string> _expandedGroups = new(StringComparer.OrdinalIgnoreCase);
     private string? _autoFilter;
     private IReadOnlyList<string> _autoMatchTerms = Array.Empty<string>();
+    private string? _capturedHost;
+    private IntPtr _foregroundHwnd;
+    private bool _autoFillInFlight;
     private bool _chipSync;
     private bool _conflictScanRunning;
     private bool _skipConflictScanOnReload;
@@ -75,7 +78,14 @@ public partial class VaultView : UserControl
         _toastTimer.Tick += (_, _) => HideStatusToast();
         ForegroundWindowMonitor.Instance.ForegroundChanged += (_, info) =>
         {
-            _autoFilter = info.UrlHint;
+            // Extension tab host wins when present; UIA capture is fallback for Relevant only.
+            if (string.IsNullOrWhiteSpace(VaultNativePipeServer.Instance.LastExtensionHost))
+            {
+                _autoFilter = info.UrlHint;
+                _capturedHost = info.CapturedHost;
+            }
+
+            _foregroundHwnd = info.Hwnd;
             _autoMatchTerms = info.MatchTerms.Count > 0
                 ? info.MatchTerms
                 : string.IsNullOrWhiteSpace(info.UrlHint)
@@ -84,8 +94,23 @@ public partial class VaultView : UserControl
 
             UpdateFilterHint();
             // Auto-filter only drives the Relevant chip — never All/Favorites/Recents.
+            // Browser autofill is handled by the extension (not UIA AutoFillService).
             if (_filter == VaultFilterMode.Relevant)
                 ApplyFilter();
+        };
+
+        VaultNativePipeServer.Instance.TabHostChanged += (_, host) =>
+        {
+            Dispatcher.BeginInvoke(() =>
+            {
+                _capturedHost = host;
+                _autoFilter = host;
+                if (!string.IsNullOrWhiteSpace(host))
+                    _autoMatchTerms = new[] { host };
+                UpdateFilterHint();
+                if (_filter == VaultFilterMode.Relevant)
+                    ApplyFilter();
+            });
         };
     }
 
@@ -433,10 +458,13 @@ public partial class VaultView : UserControl
         if (!string.IsNullOrWhiteSpace(q))
             rows = rows.Where(r => MatchesSearch(q, r));
 
-        // Recents keep last-used order; other chips honor the sort menu.
-        var nextList = _filter == VaultFilterMode.Recents
-            ? rows.ToList()
-            : SortRows(rows).ToList();
+        // Recents keep last-used order; Relevant with captured host is already score-sorted.
+        List<VaultRow> nextList;
+        if (_filter == VaultFilterMode.Recents ||
+            (_filter == VaultFilterMode.Relevant && !string.IsNullOrWhiteSpace(_capturedHost)))
+            nextList = rows.ToList();
+        else
+            nextList = SortRows(rows).ToList();
 
         BindRows(nextList);
     }
@@ -570,8 +598,22 @@ public partial class VaultView : UserControl
         if (_autoMatchTerms.Count == 0 && ForegroundWindowMonitor.Instance.Current is { } current)
         {
             _autoFilter = current.UrlHint;
+            _capturedHost = current.CapturedHost;
+            _foregroundHwnd = current.Hwnd;
             _autoMatchTerms = current.MatchTerms;
             UpdateFilterHint();
+        }
+
+        // Domain path: scored host match only (no title-token false positives).
+        if (!string.IsNullOrWhiteSpace(_capturedHost))
+        {
+            foreach (var row in _allRowsView)
+                row.DomainScore = VaultDomain.ScoreMatch(_capturedHost, row.Host);
+
+            return _allRowsView
+                .Where(r => r.DomainScore > 0)
+                .OrderByDescending(r => r.DomainScore)
+                .ThenBy(r => r.SortTitle, StringComparer.OrdinalIgnoreCase);
         }
 
         if (_autoMatchTerms.Count == 0 && string.IsNullOrWhiteSpace(_autoFilter))
@@ -583,6 +625,9 @@ public partial class VaultView : UserControl
         var terms = ForegroundWindowMonitor.StrongMatchTerms(raw);
         if (terms.Count == 0)
             return Array.Empty<VaultRow>();
+
+        foreach (var row in _allRowsView)
+            row.DomainScore = 0;
 
         return _allRowsView.Where(r => MatchesRelevant(terms, r));
     }
@@ -616,8 +661,7 @@ public partial class VaultView : UserControl
     }
 
     /// <summary>
-    /// Relevance requires a distinctive term: shared domain label, or a strong token
-    /// as a whole word in title/username/host/URL. Weak words like "tool" never match alone.
+    /// Title-heuristic fallback when no captured host: distinctive whole-word / domain-label hits only.
     /// </summary>
     private static bool MatchesRelevant(IReadOnlyList<string> terms, VaultRow r)
     {
@@ -627,7 +671,7 @@ public partial class VaultView : UserControl
             if (ForegroundWindowMonitor.IsWeakToken(term) && !term.Contains('.'))
                 continue;
 
-            if (!string.IsNullOrEmpty(r.Host) && DomainSharesLabel(r.Host, term))
+            if (!string.IsNullOrEmpty(r.Host) && VaultDomain.ScoreMatch(term, r.Host) > 0)
                 return true;
 
             if (HasWholeWord(r.SortTitle, term) ||
@@ -636,22 +680,15 @@ public partial class VaultView : UserControl
                 HasWholeWord(r.Host, term))
                 return true;
 
-            // Longer distinctive tokens may match as a substring of a host/title compound
-            // (e.g. "ynab" in "app.ynab.com"), but never short/generic words.
             if (term.Length >= 5 &&
                 !term.Contains(' ') &&
                 (r.Host.Contains(term, StringComparison.OrdinalIgnoreCase) ||
-                 r.SortTitle.Contains(term, StringComparison.OrdinalIgnoreCase) ||
-                 r.MatchBlob.Contains(term, StringComparison.OrdinalIgnoreCase)))
+                 r.SortTitle.Contains(term, StringComparison.OrdinalIgnoreCase)))
                 return true;
 
             foreach (var vaultToken in vaultTokens)
             {
                 if (vaultToken.Equals(term, StringComparison.OrdinalIgnoreCase))
-                    return true;
-                if (term.Length >= 5 && vaultToken.Length >= 5 &&
-                    (vaultToken.Contains(term, StringComparison.OrdinalIgnoreCase) ||
-                     term.Contains(vaultToken, StringComparison.OrdinalIgnoreCase)))
                     return true;
             }
         }
@@ -669,44 +706,8 @@ public partial class VaultView : UserControl
                 return true;
         }
 
-        // Tokenize skips weak words — still allow exact phrase containment for multi-word terms.
         if (term.Contains(' ') && text.Contains(term, StringComparison.OrdinalIgnoreCase))
             return true;
-
-        return false;
-    }
-
-    private static bool DomainSharesLabel(string host, string term)
-    {
-        var needle = term.Trim().Trim('.').ToLowerInvariant();
-        if (needle.StartsWith("www.", StringComparison.Ordinal))
-            needle = needle[4..];
-        if (needle.Length < 4 || ForegroundWindowMonitor.IsWeakToken(needle))
-            return false;
-
-        host = host.Trim().Trim('.').ToLowerInvariant();
-        if (host.StartsWith("www.", StringComparison.Ordinal))
-            host = host[4..];
-
-        if (host.Equals(needle, StringComparison.Ordinal) ||
-            host.EndsWith("." + needle, StringComparison.Ordinal) ||
-            needle.EndsWith("." + host, StringComparison.Ordinal))
-            return true;
-
-        // Exact DNS label only — no substring ("tool" must not hit random hosts).
-        foreach (var label in host.Split('.', StringSplitOptions.RemoveEmptyEntries))
-        {
-            if (label.Length < 4 || ForegroundWindowMonitor.IsWeakToken(label))
-                continue;
-            if (label.Equals(needle, StringComparison.OrdinalIgnoreCase))
-                return true;
-            // "ynab" ↔ "app.ynab.com"; "github" ↔ "github.com"
-            if (needle.Length >= 5 &&
-                (label.Equals(needle, StringComparison.OrdinalIgnoreCase) ||
-                 (label.StartsWith(needle, StringComparison.OrdinalIgnoreCase) && label.Length - needle.Length <= 2) ||
-                 (needle.StartsWith(label, StringComparison.OrdinalIgnoreCase) && needle.Length - label.Length <= 2)))
-                return true;
-        }
 
         return false;
     }
@@ -861,6 +862,24 @@ public partial class VaultView : UserControl
         return fallback;
     }
 
+    private async void SlideFill_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not FrameworkElement { Tag: VaultRow row })
+            return;
+        CloseOpenSlide();
+        await FillRowAsync(row, forceLogin: false);
+        e.Handled = true;
+    }
+
+    private async void SlideLogin_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not FrameworkElement { Tag: VaultRow row })
+            return;
+        CloseOpenSlide();
+        await FillRowAsync(row, forceLogin: true);
+        e.Handled = true;
+    }
+
     private async void SlideEdit_Click(object sender, RoutedEventArgs e)
     {
         if (sender is not FrameworkElement { Tag: VaultRow row })
@@ -872,6 +891,72 @@ public partial class VaultView : UserControl
         await EditItemAsync(item);
         e.Handled = true;
     }
+
+    private async Task FillRowAsync(VaultRow row, bool forceLogin, IntPtr? targetHwnd = null)
+    {
+        if (_autoFillInFlight)
+            return;
+
+        // Browser pages must use the extension — UIA only fills email and breaks two-step.
+        var fg = ForegroundWindowMonitor.Instance.Current;
+        var process = fg?.ProcessName ?? "";
+        if (IsBrowserProcess(process))
+        {
+            ShowStatusToast("Use browser extension for web logins");
+            AppDialog.Alert(
+                Window.GetWindow(this),
+                "Web autofill is handled by the Authenticator browser extension (Chrome / Edge / Firefox), not desktop typing.\n\n" +
+                "Settings → Browser autofill → Open extension folder, then Load unpacked on chrome://extensions and pin the icon.",
+                "Browser extension",
+                AppDialogKind.Info);
+            return;
+        }
+
+        _autoFillInFlight = true;
+        try
+        {
+            var item = await _vault.GetByIdAsync(row.Id, revealSecrets: true, revealPassword: true);
+            if (item is null)
+            {
+                ShowStatusToast("Item not found");
+                return;
+            }
+
+            var hwnd = targetHwnd ?? _foregroundHwnd;
+            if (hwnd == IntPtr.Zero && fg is not null)
+                hwnd = fg.Hwnd;
+
+            var autoLogin = forceLogin || item.AllowAutoLogin;
+            await AutoFillService.Instance.FillLoginAsync(
+                item,
+                hwnd,
+                autoLogin: autoLogin,
+                includeTotp: autoLogin && (!string.IsNullOrWhiteSpace(item.TotpSecret) || item.LinkedAccountId is not null));
+
+            if (_all.FirstOrDefault(i => i.Id == row.Id) is { } cached)
+                cached.LastUsedAt = DateTime.UtcNow;
+
+            ShowStatusToast(autoLogin ? "Auto-login sent" : "Credentials filled");
+        }
+        catch (Exception ex)
+        {
+            LoggingConfiguration.LogException(ex, $"Autofill failed for vault item {row.Id}.", nameof(VaultView));
+            AppDialog.Alert(Window.GetWindow(this), ex.Message, "Auto-fill", AppDialogKind.Warning);
+        }
+        finally
+        {
+            _autoFillInFlight = false;
+        }
+    }
+
+    private static bool IsBrowserProcess(string processName) =>
+        processName.Equals("chrome", StringComparison.OrdinalIgnoreCase) ||
+        processName.Equals("msedge", StringComparison.OrdinalIgnoreCase) ||
+        processName.Equals("msedgewebview2", StringComparison.OrdinalIgnoreCase) ||
+        processName.Equals("firefox", StringComparison.OrdinalIgnoreCase) ||
+        processName.Equals("brave", StringComparison.OrdinalIgnoreCase) ||
+        processName.Equals("opera", StringComparison.OrdinalIgnoreCase) ||
+        processName.Equals("vivaldi", StringComparison.OrdinalIgnoreCase);
 
     private async void SlideDelete_Click(object sender, RoutedEventArgs e)
     {
@@ -1658,6 +1743,10 @@ public partial class VaultView : UserControl
         public string[] MatchTokens { get; set; } = Array.Empty<string>();
         /// <summary>Provider ids with <c>ExternalLink.IsMismatch</c> for this row.</summary>
         public string[] MismatchProviders { get; set; } = Array.Empty<string>();
+        public bool AllowAutoFill { get; set; }
+        public bool AllowAutoLogin { get; set; }
+        /// <summary>Transient domain match score for Relevant filter (0–100).</summary>
+        public int DomainScore { get; set; }
         public bool IsFavorite
         {
             get => _isFavorite;
@@ -1730,6 +1819,9 @@ public partial class VaultView : UserControl
             MatchBlob = other.MatchBlob;
             MatchTokens = other.MatchTokens;
             MismatchProviders = other.MismatchProviders;
+            AllowAutoFill = other.AllowAutoFill;
+            AllowAutoLogin = other.AllowAutoLogin;
+            DomainScore = other.DomainScore;
             IsFavorite = other.IsFavorite;
             Initial = other.Initial;
             IconBrush = other.IconBrush;
@@ -1743,7 +1835,7 @@ public partial class VaultView : UserControl
 
         public static VaultRow From(VaultItem item)
         {
-            var host = TryHost(item.Url);
+            var host = VaultDomain.NormalizeDomain(item.Url) ?? "";
             var username = item.Username?.Trim() ?? "";
             var subtitle = !string.IsNullOrWhiteSpace(host) ? host : item.Title;
             // Secondary line: username when present, otherwise host (never duplicate the title).
@@ -1777,6 +1869,8 @@ public partial class VaultView : UserControl
                 MatchTokens = tokens.ToArray(),
                 MismatchProviders = mismatchProviders,
                 IsFavorite = item.IsFavorite,
+                AllowAutoFill = item.AllowAutoFill,
+                AllowAutoLogin = item.AllowAutoLogin,
                 HasMismatch = hasMismatch,
                 Initial = string.IsNullOrWhiteSpace(seed) ? "?" : seed.Trim()[..1].ToUpperInvariant(),
                 IconBrush = AccountEdits.InitialBrush(seed),
@@ -1807,15 +1901,6 @@ public partial class VaultView : UserControl
             VaultItemType.HealthInsurance => "\uE95E",   // Medical
             _ => "\uE8B7"                                // More
         };
-
-        private static string TryHost(string? url)
-        {
-            if (!string.IsNullOrWhiteSpace(url) &&
-                Uri.TryCreate(url, UriKind.Absolute, out var uri) &&
-                !string.IsNullOrWhiteSpace(uri.Host))
-                return uri.Host;
-            return "";
-        }
     }
 }
 

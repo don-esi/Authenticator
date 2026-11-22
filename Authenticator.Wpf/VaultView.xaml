@@ -92,6 +92,18 @@
 							IsHitTestVisible="False"
 							Tag="SlideActions">
 					<Button Width="44" Margin="0,0,4,0" VerticalAlignment="Stretch" Tag="{Binding}"
+							Click="SlideFill_Click" Style="{StaticResource SlideActionButton}"
+							Background="#2563EB" ToolTip="Fill username and password into the browser"
+							AutomationProperties.Name="Fill credentials">
+						<TextBlock FontFamily="Segoe MDL2 Assets" FontSize="16" Foreground="White" Text="&#xE8A7;" />
+					</Button>
+					<Button Width="44" Margin="0,0,4,0" VerticalAlignment="Stretch" Tag="{Binding}"
+							Click="SlideLogin_Click" Style="{StaticResource SlideActionButton}"
+							Background="#1D4ED8" ToolTip="Fill and activate Next / Sign in"
+							AutomationProperties.Name="Auto-login">
+						<TextBlock FontFamily="Segoe MDL2 Assets" FontSize="16" Foreground="White" Text="&#xE77B;" />
+					</Button>
+					<Button Width="44" Margin="0,0,4,0" VerticalAlignment="Stretch" Tag="{Binding}"
 							Click="SlideEdit_Click" Style="{StaticResource SlideActionButton}"
 							Background="#9CA3AF" ToolTip="Edit" AutomationProperties.Name="Edit item">
 						<TextBlock FontFamily="Segoe MDL2 Assets" FontSize="16" Foreground="White" Text="&#xE70F;" />

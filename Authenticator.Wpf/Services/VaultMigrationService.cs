@@ -102,7 +102,9 @@ public sealed class VaultMigrationService
                 PayloadJson nvarchar(max) NULL,
                 CreatedAt datetime2 NOT NULL,
                 ModifiedAt datetime2 NULL,
-                LastUsedAt datetime2 NULL
+                LastUsedAt datetime2 NULL,
+                AllowAutoFill bit NOT NULL CONSTRAINT DF_VaultItems_AllowAutoFill DEFAULT 0,
+                AllowAutoLogin bit NOT NULL CONSTRAINT DF_VaultItems_AllowAutoLogin DEFAULT 0
               );
             END
             """, ct);
@@ -113,6 +115,26 @@ public sealed class VaultMigrationService
                AND COL_LENGTH(N'dbo.VaultItems', N'LastUsedAt') IS NULL
             BEGIN
               ALTER TABLE dbo.VaultItems ADD LastUsedAt datetime2 NULL;
+            END
+            """, ct);
+
+        await db.Database.ExecuteSqlRawAsync(
+            """
+            IF OBJECT_ID(N'dbo.VaultItems', N'U') IS NOT NULL
+               AND COL_LENGTH(N'dbo.VaultItems', N'AllowAutoFill') IS NULL
+            BEGIN
+              ALTER TABLE dbo.VaultItems ADD AllowAutoFill bit NOT NULL
+                CONSTRAINT DF_VaultItems_AllowAutoFill DEFAULT 0;
+            END
+            """, ct);
+
+        await db.Database.ExecuteSqlRawAsync(
+            """
+            IF OBJECT_ID(N'dbo.VaultItems', N'U') IS NOT NULL
+               AND COL_LENGTH(N'dbo.VaultItems', N'AllowAutoLogin') IS NULL
+            BEGIN
+              ALTER TABLE dbo.VaultItems ADD AllowAutoLogin bit NOT NULL
+                CONSTRAINT DF_VaultItems_AllowAutoLogin DEFAULT 0;
             END
             """, ct);
 

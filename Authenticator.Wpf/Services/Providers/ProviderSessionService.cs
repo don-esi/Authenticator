@@ -331,11 +331,23 @@ public sealed class ProviderSessionService
     public async Task<VaultSyncResult> SyncAllImportAsync(CancellationToken ct = default)
     {
         var total = new VaultSyncResult();
-        foreach (var provider in LiveConnected.ToList())
+        // Lazy connect: saved providers are not opened at unlock — bring them up on demand.
+        foreach (var conn in SavedConnections.ToList())
         {
             ct.ThrowIfCancellationRequested();
-            var imported = await new VaultImportService().ImportMissingAsync(provider, ct);
-            total.Imported += imported;
+            try
+            {
+                var provider = await EnsureConnectedAsync(conn.ProviderId, ct);
+                var imported = await new VaultImportService().ImportMissingAsync(provider, ct);
+                total.Imported += imported;
+            }
+            catch (Exception ex)
+            {
+                LoggingConfiguration.LogException(
+                    ex,
+                    $"Sync import skipped for {conn.ProviderId}.",
+                    nameof(ProviderSessionService));
+            }
         }
 
         return total;
@@ -353,12 +365,23 @@ public sealed class ProviderSessionService
     public async Task<VaultSyncResult> ScanAllConflictsAsync(CancellationToken ct = default)
     {
         var total = new VaultSyncResult();
-        foreach (var provider in LiveConnected.ToList())
+        foreach (var conn in SavedConnections.ToList())
         {
             ct.ThrowIfCancellationRequested();
-            var part = await new VaultImportService().ScanConflictsAsync(provider, ct);
-            total.Unchanged += part.Unchanged;
-            total.Conflicts += part.Conflicts;
+            try
+            {
+                var provider = await EnsureConnectedAsync(conn.ProviderId, ct);
+                var part = await new VaultImportService().ScanConflictsAsync(provider, ct);
+                total.Unchanged += part.Unchanged;
+                total.Conflicts += part.Conflicts;
+            }
+            catch (Exception ex)
+            {
+                LoggingConfiguration.LogException(
+                    ex,
+                    $"Conflict scan skipped for {conn.ProviderId}.",
+                    nameof(ProviderSessionService));
+            }
         }
 
         ConflictScanCompleted?.Invoke(this, total);

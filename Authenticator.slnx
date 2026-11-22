@@ -4,14 +4,7 @@
     <Platform Name="x64" />
     <Platform Name="x86" />
   </Configurations>
-  <Project Path="Authenticator.Crypto/Authenticator.Crypto.csproj">
-    <Platform Solution="*|ARM64" Project="AnyCPU" />
-    <Platform Solution="*|x64" Project="AnyCPU" />
-    <Platform Solution="*|x86" Project="AnyCPU" />
-  </Project>
-  <Project Path="Authenticator.Wpf/Authenticator.Wpf.csproj">
-    <Platform Solution="*|ARM64" Project="AnyCPU" />
-    <Platform Solution="*|x64" Project="AnyCPU" />
-    <Platform Solution="*|x86" Project="AnyCPU" />
-  </Project>
+  <Project Path="Authenticator.Crypto/Authenticator.Crypto.csproj" />
+  <Project Path="Authenticator.NativeHost/Authenticator.NativeHost.csproj" />
+  <Project Path="Authenticator.Wpf/Authenticator.Wpf.csproj" />
 </Solution>

@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <style>
+    body { font: 13px/1.4 system-ui, sans-serif; margin: 12px; width: 280px; color: #202124; }
+    h1 { font-size: 14px; margin: 0 0 8px; }
+    .row { margin: 6px 0; }
+    .ok { color: #15803d; }
+    .bad { color: #b45309; }
+    button { margin-top: 8px; width: 100%; padding: 8px; cursor: pointer; }
+    code { font-size: 11px; }
+  </style>
+</head>
+<body>
+  <h1>Authenticator Vault</h1>
+  <div class="row" id="status">Checking desktop vault…</div>
+  <div class="row" id="detail"></div>
+  <button id="ping">Test connection</button>
+  <script src="popup.js"></script>
+</body>
+</html>

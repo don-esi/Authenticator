@@ -36,6 +36,7 @@ public sealed class OfflineVaultService
         await using var db = new OfflineVaultDbContext();
         await db.Database.EnsureCreatedAsync(ct);
         await EnsureLastUsedAtColumnAsync(db, ct);
+        await EnsureAutoFillColumnsAsync(db, ct);
         await EnsureReconcileHistoryTableAsync(db, ct);
     }
 
@@ -71,19 +72,8 @@ public sealed class OfflineVaultService
     {
         try
         {
-            var connection = db.Database.GetDbConnection();
-            if (connection.State != System.Data.ConnectionState.Open)
-                await connection.OpenAsync(ct);
-
-            await using var check = connection.CreateCommand();
-            check.CommandText = "PRAGMA table_info(VaultItems)";
-            await using var reader = await check.ExecuteReaderAsync(ct);
-            while (await reader.ReadAsync(ct))
-            {
-                if (string.Equals(reader.GetString(1), "LastUsedAt", StringComparison.OrdinalIgnoreCase))
-                    return;
-            }
-            await reader.DisposeAsync();
+            if (await OfflineColumnExistsAsync(db, "VaultItems", "LastUsedAt", ct))
+                return;
 
             await db.Database.ExecuteSqlRawAsync("ALTER TABLE VaultItems ADD COLUMN LastUsedAt TEXT NULL", ct);
         }
@@ -91,6 +81,42 @@ public sealed class OfflineVaultService
         {
             LoggingConfiguration.LogException(ex, "Failed to ensure offline VaultItems.LastUsedAt column.", nameof(OfflineVaultService));
         }
+    }
+
+    private static async Task EnsureAutoFillColumnsAsync(OfflineVaultDbContext db, CancellationToken ct)
+    {
+        try
+        {
+            if (!await OfflineColumnExistsAsync(db, "VaultItems", "AllowAutoFill", ct))
+                await db.Database.ExecuteSqlRawAsync(
+                    "ALTER TABLE VaultItems ADD COLUMN AllowAutoFill INTEGER NOT NULL DEFAULT 0", ct);
+            if (!await OfflineColumnExistsAsync(db, "VaultItems", "AllowAutoLogin", ct))
+                await db.Database.ExecuteSqlRawAsync(
+                    "ALTER TABLE VaultItems ADD COLUMN AllowAutoLogin INTEGER NOT NULL DEFAULT 0", ct);
+        }
+        catch (Exception ex)
+        {
+            LoggingConfiguration.LogException(ex, "Failed to ensure offline VaultItems autofill columns.", nameof(OfflineVaultService));
+        }
+    }
+
+    private static async Task<bool> OfflineColumnExistsAsync(
+        OfflineVaultDbContext db, string table, string column, CancellationToken ct)
+    {
+        var connection = db.Database.GetDbConnection();
+        if (connection.State != System.Data.ConnectionState.Open)
+            await connection.OpenAsync(ct);
+
+        await using var check = connection.CreateCommand();
+        check.CommandText = $"PRAGMA table_info({table})";
+        await using var reader = await check.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+        {
+            if (string.Equals(reader.GetString(1), column, StringComparison.OrdinalIgnoreCase))
+                return true;
+        }
+
+        return false;
     }
 
     public async Task TouchLastUsedAsync(Guid id, DateTime usedAtUtc, CancellationToken ct = default)
@@ -479,7 +505,9 @@ public sealed class OfflineVaultService
         PayloadJson = item.PayloadJson,
         CreatedAt = item.CreatedAt,
         ModifiedAt = item.ModifiedAt,
-        LastUsedAt = item.LastUsedAt
+        LastUsedAt = item.LastUsedAt,
+        AllowAutoFill = item.AllowAutoFill,
+        AllowAutoLogin = item.AllowAutoLogin
     };
 
     private sealed class VaultItemDto
