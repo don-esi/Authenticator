@@ -1,4 +1,4 @@
-; Authenticator Setup — elevated Inno installer with SQL Server Express bootstrap (Host) or LAN Join.
+; Authenticator Setup - elevated Inno installer with SQL Server Express bootstrap (Host) or LAN Join.
 ; Compile via packaging\build-setup.ps1 (requires Inno Setup 6.4+ / 7 for DownloadTemporaryFile).
 
 #ifndef MyAppVersion
@@ -29,6 +29,7 @@ Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
 UninstallDisplayIcon={app}\{#MyAppExeName}
+UsePreviousAppDir=yes
 CloseApplications=yes
 RestartIfNeededByRun=no
 MinVersion=10.0.19041
@@ -40,7 +41,12 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
 
 [Files]
+; publish tree includes WPF app, Browser (extension), and NativeHost from build-setup.ps1
 Source: "publish\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+
+[InstallDelete]
+Type: filesandordirs; Name: "{app}\Browser"
+Type: filesandordirs; Name: "{app}\NativeHost"
 
 [Icons]
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
@@ -346,6 +352,35 @@ begin
   Result := True;
 end;
 
+function InitializeSetup: Boolean;
+var
+  UninstallKey, UninstallString: String;
+  ResultCode: Integer;
+begin
+  Result := True;
+  UninstallKey := 'Software\Microsoft\Windows\CurrentVersion\Uninstall\' +
+    Chr(123) + 'A8E3C5F1-9B42-4D6E-8F1A-2C7D9E0B4A31' + Chr(125) + '_is1';
+  UninstallString := '';
+  if not RegQueryStringValue(HKLM64, UninstallKey, 'UninstallString', UninstallString) then
+    if not RegQueryStringValue(HKLM32, UninstallKey, 'UninstallString', UninstallString) then
+      RegQueryStringValue(HKCU, UninstallKey, 'UninstallString', UninstallString);
+
+  if UninstallString <> '' then
+  begin
+    UninstallString := RemoveQuotes(UninstallString);
+    Log('Uninstalling previous version: ' + UninstallString);
+    if not Exec(UninstallString, '/VERYSILENT /NORESTART /SUPPRESSMSGBOXES', '', SW_HIDE, ewWaitUntilTerminated, ResultCode) then
+    begin
+      if MsgBox(
+           'Could not start the previous Authenticator uninstaller.' + #13#10 + #13#10 +
+           'Continue installing anyway?',
+           mbConfirmation,
+           MB_YESNO) = IDNO then
+        Result := False;
+    end;
+  end;
+end;
+
 procedure InitializeWizard;
 begin
   InstallRole := 0;
@@ -395,7 +430,7 @@ begin
   end;
 
   if InstallRole = 2 then
-    Log('Local-only role: installing SQL Express if missing.');
+    Log('Local-only role: installing SQL Express if missing.')
   else
     Log('Host role: downloading and installing SQL Server Express (SQLEXPRESS).');
 
@@ -477,13 +512,14 @@ begin
   if not RegWriteStringValue(HKCU, 'Software\Mozilla\NativeMessagingHosts\com.authenticator.native', '', FirefoxManifest) then
     Log('Failed to register Firefox native messaging host');
 
-  Log('Registered native messaging host → ' + HostExe);
+  Log('Registered native messaging host -> ' + HostExe);
   Result := True;
 end;
 
 function RewriteBrowserUpdatesXml: Boolean;
 var
-  UpdatesPath, CrxPath, Content, Codebase: String;
+  UpdatesPath, CrxPath, Codebase, Content: String;
+  ContentA: AnsiString;
 begin
   Result := False;
   UpdatesPath := ExpandConstant('{app}\Browser\updates.xml');
@@ -500,12 +536,13 @@ begin
     Exit;
   end;
 
-  if not LoadStringFromFile(UpdatesPath, Content) then
+  if not LoadStringFromFile(UpdatesPath, ContentA) then
   begin
     Log('Could not read updates.xml');
     Exit;
   end;
 
+  Content := ContentA;
   Codebase := FileToUrlPath(CrxPath);
   StringChangeEx(Content, '__CRX_CODEBASE__', Codebase, True);
   if not SaveStringToFile(UpdatesPath, Content, False) then
@@ -514,7 +551,7 @@ begin
     Exit;
   end;
 
-  Log('Rewrote updates.xml codebase → ' + Codebase);
+  Log('Rewrote updates.xml codebase -> ' + Codebase);
   Result := True;
 end;
 
@@ -526,7 +563,7 @@ begin
   UpdatesPath := ExpandConstant('{app}\Browser\updates.xml');
   if not FileExists(ExpandConstant('{app}\Browser\AuthenticatorVault.crx')) then
   begin
-    Log('No CRX — skipping ExtensionInstallForcelist');
+    Log('No CRX - skipping ExtensionInstallForcelist');
     Exit;
   end;
   if not RewriteBrowserUpdatesXml then
@@ -561,14 +598,14 @@ begin
     if not WriteConnectionJson then
       MsgBox(
         'App files were installed, but connection.json could not be written under LocalAppData.' + #13#10 +
-        'Create %LocalAppData%\Authenticator\connection.json or use Settings → Connection.',
+        'Create %LocalAppData%\Authenticator\connection.json or use Settings -> Connection.',
         mbError,
         MB_OK);
 
     if not WriteNativeHostManifests then
-      Log('Native host registration failed — use Settings → Browser autofill → Register native host.');
+      Log('Native host registration failed - use Settings -> Browser autofill -> Register native host.');
 
     if not TryForceInstallChromiumExtension then
-      Log('Chromium force-install skipped — use Settings → Browser autofill → Load unpacked from {app}\Browser.');
+      Log('Chromium force-install skipped - use Settings -> Browser autofill -> Load unpacked from the installed Browser folder.');
   end;
 end;

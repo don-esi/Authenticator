@@ -27,6 +27,7 @@ Output: `packaging\dist\AuthenticatorSetup-<version>.exe`
 - Publishes `Authenticator.NativeHost` → `publish\NativeHost\`
 - Copies unpacked browser extension → `publish\Browser\` (and packs `AuthenticatorVault.crx` when a PEM is provided)
 - Setup requires administrator rights
+- On start: silently uninstalls any previous Authenticator install with the same AppId (`InitializeSetup`), clears `{app}\Browser` / `{app}\NativeHost`, then installs a clean tree including the extension and native host
 - Post-install: registers native messaging (Chrome/Edge/Firefox HKCU) and **best-effort** HKLM `ExtensionInstallForcelist` when a CRX exists (`file://` update URLs are often ignored on consumer Chrome — Load unpacked from `{app}\Browser` remains the fallback)
 - If **any** local SQL Server instance/service is already present (default or named, including non-`SQLEXPRESS`), skips Express download/install
 - Only when no SQL Server is found: downloads SQL Server 2022 Express Core (`SQLEXPR_x64_ENU.exe`, ~280 MB), extracts it, and silent-installs instance `SQLEXPRESS`
