@@ -63,17 +63,29 @@ function New-SizedPng {
 $layer16 = Join-Path $assets 'app-icon-16.png'
 $layer32 = Join-Path $assets 'app-icon-32.png'
 $layer48 = Join-Path $assets 'app-icon-48.png'
+$layer64 = Join-Path $assets 'app-icon-64.png'
 $layer256 = Join-Path $assets 'app-icon-256.png'
 
 New-SizedPng -Size 16 -OutPath $layer16 -Zoom 1.2
 New-SizedPng -Size 32 -OutPath $layer32 -Zoom 1.12
 New-SizedPng -Size 48 -OutPath $layer48 -Zoom 1.06
+New-SizedPng -Size 64 -OutPath $layer64 -Zoom 1.04
 New-SizedPng -Size 256 -OutPath $layer256 -Zoom 1.0
 Write-Host 'Wrote size previews'
 
+# Multi-size ICO from PNG layers — used by ApplicationIcon, tray/exe, and Inno SetupIconFile.
 $ico = Join-Path $assets 'app.ico'
-Invoke-Magick $layer16 $layer32 $layer48 $layer256 $ico
+Invoke-Magick $layer16 $layer32 $layer48 $layer64 $layer256 $ico
 Write-Host "Wrote $ico"
+
+# Inno wizard chrome (modern style uses the small image in the header).
+$packaging = Join-Path $repoRoot 'packaging'
+New-Item -ItemType Directory -Force -Path $packaging | Out-Null
+Invoke-Magick $source -filter Lanczos -resize '55x55' -gravity center -background white -extent '55x55' -type TrueColor `
+    (Join-Path $packaging 'wizard-small.bmp')
+Invoke-Magick $source -filter Lanczos -resize '164x164' -gravity north -background white -extent '164x314' -type TrueColor `
+    (Join-Path $packaging 'wizard-image.bmp')
+Write-Host 'Wrote packaging wizard bitmaps'
 
 New-SizedPng -Size 16 -OutPath (Join-Path $browserIcons 'icon16.png') -Zoom 1.2
 New-SizedPng -Size 48 -OutPath (Join-Path $browserIcons 'icon48.png') -Zoom 1.06
