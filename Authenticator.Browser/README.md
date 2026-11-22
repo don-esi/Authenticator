@@ -36,7 +36,7 @@ Store listing (CWS / Edge Add-ons / AMO) is deferred.
 
 ## Seeing the extension
 
-After Load unpacked, open the **puzzle / extensions** menu and **pin** “Authenticator Vault” so the blue **A** icon stays on the toolbar.
+After Load unpacked, open the **puzzle / extensions** menu and **pin** “Authenticator Vault” so the shield / 2FA icon stays on the toolbar.
 
 | Badge | Meaning |
 |-------|---------|

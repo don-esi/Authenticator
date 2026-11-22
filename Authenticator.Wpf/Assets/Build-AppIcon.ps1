@@ -1,108 +1,96 @@
-Add-Type -AssemblyName System.Drawing
+﻿# Builds Authenticator.Wpf\Assets\app.ico and Authenticator.Browser\icons\*.png
+# from app-icon-source.jpg (shield + lock + 2FA on white).
+#
+# Small sizes use a mild center zoom so the mark stays readable.
+# Requires ImageMagick (`magick` on PATH).
+
+$ErrorActionPreference = 'Stop'
+
 $assets = Split-Path -Parent $MyInvocation.MyCommand.Path
-New-Item -ItemType Directory -Force -Path $assets | Out-Null
+$repoRoot = Resolve-Path (Join-Path $assets '..\..')
+$browserIcons = Join-Path $repoRoot 'Authenticator.Browser\icons'
+$source = Join-Path $assets 'app-icon-source.jpg'
 
-function Draw-Shield([int]$size) {
-    $bmp = New-Object System.Drawing.Bitmap $size, $size, ([System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
-    $g = [System.Drawing.Graphics]::FromImage($bmp)
-    $g.Clear([System.Drawing.Color]::Transparent)
-    $g.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
-    $g.PixelOffsetMode = [System.Drawing.Drawing2D.PixelOffsetMode]::HighQuality
+if (-not (Test-Path $source)) {
+    throw "Missing source artwork: $source"
+}
 
-    $pad = [int]($size * 0.08)
-    $left = $pad
-    $top = $pad
-    $right = $size - $pad
-    $bottom = $size - $pad
-    $midX = ($left + $right) / 2.0
+if (-not (Get-Command magick -ErrorAction SilentlyContinue)) {
+    throw 'ImageMagick `magick` not found on PATH.'
+}
 
-    $pts = [System.Drawing.PointF[]]@(
-        [System.Drawing.PointF]::new($midX, $top),
-        [System.Drawing.PointF]::new($right, $top + ($size * 0.08)),
-        [System.Drawing.PointF]::new($right, $top + ($size * 0.42)),
-        [System.Drawing.PointF]::new($midX, $bottom),
-        [System.Drawing.PointF]::new($left, $top + ($size * 0.42)),
-        [System.Drawing.PointF]::new($left, $top + ($size * 0.08))
+New-Item -ItemType Directory -Force -Path $assets, $browserIcons | Out-Null
+
+function Invoke-Magick {
+    param([Parameter(ValueFromRemainingArguments = $true)][string[]]$MagickArgs)
+    & magick @MagickArgs
+    if ($LASTEXITCODE -ne 0) {
+        throw "magick failed ($LASTEXITCODE): $($MagickArgs -join ' ')"
+    }
+}
+
+function New-SizedPng {
+    param(
+        [Parameter(Mandatory)][int]$Size,
+        [Parameter(Mandatory)][string]$OutPath,
+        [double]$Zoom = 1.0
     )
 
-    $brush = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(255, 0, 120, 212))
-    $g.FillPolygon($brush, $pts)
-    $pen = New-Object System.Drawing.Pen ([System.Drawing.Color]::FromArgb(255, 0, 90, 158), [Math]::Max(1.0, $size * 0.045))
-    $g.DrawPolygon($pen, $pts)
-
-    $cx = $midX
-    $bodyW = ($right - $left) * 0.34
-    $bodyH = ($bottom - $top) * 0.28
-    $bodyX = $cx - $bodyW / 2
-    $bodyY = $top + ($size * 0.40)
-    $lockTop = $bodyY - ($size * 0.12)
-    $shackleR = $bodyW * 0.28
-    $stroke = [Math]::Max(1.5, $size * 0.055)
-
-    $pen2 = New-Object System.Drawing.Pen ([System.Drawing.Color]::White, $stroke)
-    $pen2.StartCap = [System.Drawing.Drawing2D.LineCap]::Round
-    $pen2.EndCap = [System.Drawing.Drawing2D.LineCap]::Round
-    $shack = New-Object System.Drawing.RectangleF ($cx - $shackleR), $lockTop, ($shackleR * 2), ($shackleR * 2.1)
-    $g.DrawArc($pen2, $shack, 200, 140)
-
-    $radius = [Math]::Max(2.0, $size * 0.04)
-    $body = New-Object System.Drawing.Drawing2D.GraphicsPath
-    $body.AddArc($bodyX, $bodyY, $radius * 2, $radius * 2, 180, 90)
-    $body.AddArc(($bodyX + $bodyW - $radius * 2), $bodyY, $radius * 2, $radius * 2, 270, 90)
-    $body.AddArc(($bodyX + $bodyW - $radius * 2), ($bodyY + $bodyH - $radius * 2), $radius * 2, $radius * 2, 0, 90)
-    $body.AddArc($bodyX, ($bodyY + $bodyH - $radius * 2), $radius * 2, $radius * 2, 90, 90)
-    $body.CloseFigure()
-    $white = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::White)
-    $g.FillPath($white, $body)
-
-    $holeR = [Math]::Max(1.2, $size * 0.035)
-    $holeCy = $bodyY + $bodyH * 0.38
-    $blue = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(255, 0, 120, 212))
-    $g.FillEllipse($blue, ($cx - $holeR), ($holeCy - $holeR), ($holeR * 2), ($holeR * 2))
-    $stemW = $holeR * 0.85
-    $g.FillRectangle($blue, ($cx - $stemW / 2), $holeCy, $stemW, ($bodyH * 0.38))
-
-    $g.Dispose(); $brush.Dispose(); $pen.Dispose(); $pen2.Dispose(); $body.Dispose(); $white.Dispose(); $blue.Dispose()
-    return $bmp
+    if ($Zoom -gt 1.0) {
+        $cropPct = [Math]::Round(100.0 / $Zoom, 2)
+        Invoke-Magick $source `
+            -colorspace sRGB `
+            -gravity Center `
+            -crop "${cropPct}%" `
+            +repage `
+            -filter Lanczos `
+            -resize "${Size}x${Size}!" `
+            -unsharp '0x0.6+0.6+0.02' `
+            -strip `
+            $OutPath
+    }
+    else {
+        Invoke-Magick $source `
+            -colorspace sRGB `
+            -filter Lanczos `
+            -resize "${Size}x${Size}!" `
+            -unsharp '0x0.5+0.5+0.02' `
+            -strip `
+            $OutPath
+    }
 }
 
-function Write-Ico([string]$path, [int[]]$sizes) {
-    $pngs = New-Object System.Collections.Generic.List[byte[]]
-    foreach ($size in $sizes) {
-        $bmp = Draw-Shield $size
-        $ms = New-Object System.IO.MemoryStream
-        $bmp.Save($ms, [System.Drawing.Imaging.ImageFormat]::Png)
-        $pngs.Add($ms.ToArray())
-        $preview = Join-Path $assets ("shield-{0}.png" -f $size)
-        [System.IO.File]::WriteAllBytes($preview, $ms.ToArray())
-        $bmp.Dispose(); $ms.Dispose()
-    }
+$layer16 = Join-Path $assets 'app-icon-16.png'
+$layer32 = Join-Path $assets 'app-icon-32.png'
+$layer48 = Join-Path $assets 'app-icon-48.png'
+$layer256 = Join-Path $assets 'app-icon-256.png'
 
-    $fs = [System.IO.File]::Create($path)
-    $bw = New-Object System.IO.BinaryWriter $fs
-    $bw.Write([uint16]0)
-    $bw.Write([uint16]1)
-    $bw.Write([uint16]$sizes.Length)
-    $offset = 6 + (16 * $sizes.Length)
-    for ($i = 0; $i -lt $sizes.Length; $i++) {
-        $size = $sizes[$i]
-        $bw.Write([byte]($(if ($size -ge 256) { 0 } else { $size })))
-        $bw.Write([byte]($(if ($size -ge 256) { 0 } else { $size })))
-        $bw.Write([byte]0)
-        $bw.Write([byte]0)
-        $bw.Write([uint16]1)
-        $bw.Write([uint16]32)
-        $bw.Write([int]$pngs[$i].Length)
-        $bw.Write([int]$offset)
-        $offset += $pngs[$i].Length
-    }
-    foreach ($p in $pngs) { $bw.Write($p) }
-    $bw.Flush()
-    $fs.Close()
-}
+New-SizedPng -Size 16 -OutPath $layer16 -Zoom 1.2
+New-SizedPng -Size 32 -OutPath $layer32 -Zoom 1.12
+New-SizedPng -Size 48 -OutPath $layer48 -Zoom 1.06
+New-SizedPng -Size 256 -OutPath $layer256 -Zoom 1.0
+Write-Host 'Wrote size previews'
 
 $ico = Join-Path $assets 'app.ico'
-Write-Ico $ico @(16, 32, 48, 256)
-Copy-Item $ico (Join-Path (Split-Path $assets -Parent) 'app.ico') -Force
+Invoke-Magick $layer16 $layer32 $layer48 $layer256 $ico
+Write-Host "Wrote $ico"
+
+New-SizedPng -Size 16 -OutPath (Join-Path $browserIcons 'icon16.png') -Zoom 1.2
+New-SizedPng -Size 48 -OutPath (Join-Path $browserIcons 'icon48.png') -Zoom 1.06
+New-SizedPng -Size 128 -OutPath (Join-Path $browserIcons 'icon128.png') -Zoom 1.0
+Write-Host "Wrote $browserIcons"
+
+# Drop leftovers from earlier icon experiments
+@(
+    'app-icon-master.png',
+    'app-icon-master-tight.png'
+) | ForEach-Object {
+    $p = Join-Path $assets $_
+    if (Test-Path $p) { Remove-Item $p -Force }
+}
+Get-ChildItem $assets -Filter '_preview-*' -ErrorAction SilentlyContinue | Remove-Item -Force
+Get-ChildItem $assets -Filter 'shield-*.png' -ErrorAction SilentlyContinue | Remove-Item -Force
+
 Get-Item $ico | Format-List FullName, Length
-Get-ChildItem $assets -Filter 'shield-*.png' | Select-Object Name, Length
+Get-ChildItem $assets -Filter 'app-icon-*.png' | Select-Object Name, Length | Format-Table -AutoSize
+Get-ChildItem $browserIcons -Filter 'icon*.png' | Select-Object Name, Length | Format-Table -AutoSize
