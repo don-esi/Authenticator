@@ -2,6 +2,19 @@
 
 All notable changes to Authenticator are documented here.
 
+## [1.1.0] — 2026-11-22
+
+### Added
+
+- Browser extension ambiguous-match popup picker (pick among exact Auto-fill logins).
+- Equivalent domains: per-login “Also match domains” and Settings global domain groups for autofill / Relevant.
+- Inno Setup ships `Browser\` extension (optional CRX) and `NativeHost\`; post-install native messaging registration and best-effort Chromium force-install.
+- Setup silently uninstalls the previous AppId install before upgrading.
+
+### Changed
+
+- Version bumped to 1.1.0 across WPF, Crypto, NativeHost, and the browser extension.
+
 ## [1.0.1] — 2026-11-14
 
 ### Changed
