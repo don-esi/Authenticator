@@ -32,6 +32,7 @@ public partial class AuthenticatorDbContext : DbContext
     public DbSet<OfflineChangeQueueEntry> OfflineChangeQueue { get; set; } = null!;
     public DbSet<ReconcileHistoryEntry> ReconcileHistory { get; set; } = null!;
     public DbSet<DomainEquivalenceGroup> DomainEquivalenceGroups { get; set; } = null!;
+    public DbSet<SuppressedExternalOrigin> SuppressedExternalOrigins { get; set; } = null!;
 
     public static string ConnectionString => ConnectionConfig.ConnectionString;
 
@@ -144,6 +145,12 @@ public partial class AuthenticatorDbContext : DbContext
         modelBuilder.Entity<DomainEquivalenceGroup>(entity =>
         {
             entity.HasIndex(e => e.Name);
+        });
+
+        modelBuilder.Entity<SuppressedExternalOrigin>(entity =>
+        {
+            entity.HasIndex(e => new { e.Provider, e.ExternalIdNormalized }).IsUnique();
+            entity.HasIndex(e => e.MergedIntoItemId);
         });
 
         modelBuilder.Entity<AppSettings>().HasData(new AppSettings

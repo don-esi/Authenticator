@@ -26,6 +26,7 @@ public sealed class OfflineVaultDbContext : DbContext
     public DbSet<OfflineChangeQueueEntry> OfflineChangeQueue { get; set; } = null!;
     public DbSet<ReconcileHistoryEntry> ReconcileHistory { get; set; } = null!;
     public DbSet<DomainEquivalenceGroup> DomainEquivalenceGroups { get; set; } = null!;
+    public DbSet<SuppressedExternalOrigin> SuppressedExternalOrigins { get; set; } = null!;
 
     protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
     {
@@ -65,5 +66,10 @@ public sealed class OfflineVaultDbContext : DbContext
             e.Ignore(x => x.ItemTitle);
         });
         modelBuilder.Entity<DomainEquivalenceGroup>(e => e.HasIndex(x => x.Name));
+        modelBuilder.Entity<SuppressedExternalOrigin>(e =>
+        {
+            e.HasIndex(x => new { x.Provider, x.ExternalIdNormalized }).IsUnique();
+            e.HasIndex(x => x.MergedIntoItemId);
+        });
     }
 }

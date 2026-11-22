@@ -47,6 +47,8 @@ public sealed class ReconcileHistoryService
         public string? TotpSecret { get; set; }
         public bool IsFavorite { get; set; }
         public List<LinkSnapshot> Links { get; set; } = new();
+        /// <summary>Donors soft-deleted by a consolidate merge — restored on undo.</summary>
+        public List<VaultSnapshot>? MergedDonors { get; set; }
     }
 
     public sealed class LinkSnapshot
@@ -235,7 +237,11 @@ public sealed class ReconcileHistoryService
         item.IsDeleted = false;
 
         await _items.SaveAsync(item, ct);
-        await RestoreLinkFlagsAsync(item.Id, snapshot.Links, ct);
+
+        if (snapshot.MergedDonors is { Count: > 0 })
+            await UndoMergeLinksAsync(item.Id, snapshot, ct);
+        else
+            await RestoreLinkFlagsAsync(item.Id, snapshot.Links, ct);
 
         // Re-load plaintext for optional push.
         item = await _items.GetByIdAsync(item.Id, ct) ?? item;
@@ -250,9 +256,57 @@ public sealed class ReconcileHistoryService
         return item;
     }
 
+    /// <summary>
+    /// Reverse a consolidate merge: restore survivor links to pre-merge set, undelete donors + their links.
+    /// </summary>
+    private async Task UndoMergeLinksAsync(Guid survivorId, VaultSnapshot survivorBefore, CancellationToken ct)
+    {
+        var keepProviders = new HashSet<string>(
+            survivorBefore.Links
+                .Where(l => !string.IsNullOrWhiteSpace(l.Provider))
+                .Select(l => l.Provider),
+            StringComparer.OrdinalIgnoreCase);
+
+        // Drop links transferred onto survivor that were not present before merge.
+        var current = await _items.GetByIdAsync(survivorId, ct);
+        if (current?.ExternalLinks is not null)
+        {
+            foreach (var link in current.ExternalLinks.ToList())
+            {
+                if (string.IsNullOrWhiteSpace(link.Provider))
+                    continue;
+                if (!keepProviders.Contains(link.Provider))
+                    await _import.UnlinkProviderAsync(survivorId, link.Provider, ct);
+            }
+        }
+
+        await RestoreLinkFlagsAsync(survivorId, survivorBefore.Links, ct);
+
+        foreach (var donor in survivorBefore.MergedDonors ?? Enumerable.Empty<VaultSnapshot>())
+        {
+            var restored = await _items.GetByIdAsync(donor.Id, ct)
+                           ?? new VaultItem { Id = donor.Id == Guid.Empty ? Guid.NewGuid() : donor.Id };
+            restored.Title = donor.Title ?? "";
+            restored.Username = donor.Username;
+            restored.Password = donor.Password;
+            restored.Url = donor.Url;
+            restored.Notes = donor.Notes;
+            restored.TotpSecret = donor.TotpSecret;
+            restored.IsFavorite = donor.IsFavorite;
+            restored.IsDeleted = false;
+            await _items.SaveAsync(restored, ct);
+            await RestoreLinkFlagsAsync(restored.Id, donor.Links, ct);
+        }
+    }
+
     private string SealSnapshotJson(VaultSnapshot snapshot)
     {
-        var copy = new VaultSnapshot
+        var copy = CloneSnapshotSealed(snapshot);
+        return JsonSerializer.Serialize(copy, JsonOptions);
+    }
+
+    private VaultSnapshot CloneSnapshotSealed(VaultSnapshot snapshot) =>
+        new()
         {
             Id = snapshot.Id,
             Title = snapshot.Title,
@@ -268,19 +322,27 @@ public sealed class ReconcileHistoryService
                 ExternalId = l.ExternalId,
                 IsMismatch = l.IsMismatch,
                 ContentHash = l.ContentHash
-            }).ToList()
+            }).ToList(),
+            MergedDonors = snapshot.MergedDonors?.Select(CloneSnapshotSealed).ToList()
         };
-        return JsonSerializer.Serialize(copy, JsonOptions);
-    }
 
     private VaultSnapshot UnsealSnapshotJson(string json)
     {
         var snapshot = JsonSerializer.Deserialize<VaultSnapshot>(json, JsonOptions)
                        ?? throw new InvalidOperationException("Invalid reconcile snapshot.");
+        UnsealSnapshotInPlace(snapshot);
+        return snapshot;
+    }
+
+    private void UnsealSnapshotInPlace(VaultSnapshot snapshot)
+    {
         snapshot.Password = UnsealValue(snapshot.Password);
         snapshot.Notes = UnsealValue(snapshot.Notes);
         snapshot.TotpSecret = UnsealValue(snapshot.TotpSecret);
-        return snapshot;
+        if (snapshot.MergedDonors is null)
+            return;
+        foreach (var donor in snapshot.MergedDonors)
+            UnsealSnapshotInPlace(donor);
     }
 
     private string? SealValue(string? value)

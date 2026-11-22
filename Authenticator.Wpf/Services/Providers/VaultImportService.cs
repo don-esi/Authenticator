@@ -2,6 +2,7 @@ using Authenticator.Crypto;
 using Authenticator.Data;
 using Authenticator.Data.Models;
 using Authenticator.Logging;
+using Authenticator.Services;
 using Microsoft.EntityFrameworkCore;
 
 namespace Authenticator.Services.Providers;
@@ -24,6 +25,195 @@ public sealed class VaultPushResult
     public List<string> Messages { get; } = new();
 }
 
+/// <summary>Per-field source for consolidate merge (single id, multi-id join, or direct edit override).</summary>
+public sealed class MergeFieldSelection
+{
+    private readonly Dictionary<string, Guid> _sources = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, List<Guid>> _multiSources = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, string> _overrides = new(StringComparer.OrdinalIgnoreCase);
+
+    public IReadOnlyDictionary<string, Guid> Sources => _sources;
+    public IReadOnlyDictionary<string, List<Guid>> MultiSources => _multiSources;
+    public IReadOnlyDictionary<string, string> Overrides => _overrides;
+
+    public void Set(string field, Guid itemId)
+    {
+        _sources[field] = itemId;
+        _multiSources.Remove(field);
+        _overrides.Remove(field);
+    }
+
+    /// <summary>Join non-empty values from multiple items (Notes / URL / EquivalentDomains style).</summary>
+    public void SetMulti(string field, IEnumerable<Guid> itemIds)
+    {
+        var list = itemIds.Distinct().ToList();
+        if (list.Count == 0)
+            return;
+        if (list.Count == 1)
+        {
+            Set(field, list[0]);
+            return;
+        }
+
+        _multiSources[field] = list;
+        _sources.Remove(field);
+        _overrides.Remove(field);
+    }
+
+    public void SetOverride(string field, string value)
+    {
+        _overrides[field] = value;
+        _sources.Remove(field);
+        _multiSources.Remove(field);
+    }
+
+    public Guid Get(string field, Guid fallback) =>
+        _sources.TryGetValue(field, out var id) ? id : fallback;
+
+    public bool TryGetOverride(string field, out string? value) =>
+        _overrides.TryGetValue(field, out value);
+
+    public bool TryGetMulti(string field, out IReadOnlyList<Guid> ids)
+    {
+        if (_multiSources.TryGetValue(field, out var list))
+        {
+            ids = list;
+            return true;
+        }
+
+        ids = Array.Empty<Guid>();
+        return false;
+    }
+}
+
+public sealed class VaultMergeResult
+{
+    public Guid SurvivorId { get; set; }
+    public int DonorsDeleted { get; set; }
+    public int LinksTransferred { get; set; }
+    public int LinksDroppedSameProvider { get; set; }
+    public VaultPushResult? Push { get; set; }
+    public List<string> Messages { get; } = new();
+}
+
+public sealed class ConsolidateSuggestGroup
+{
+    public string Key { get; init; } = "";
+    public string Label { get; init; } = "";
+    public bool IsExactHost { get; init; }
+    public List<VaultItem> Items { get; init; } = new();
+}
+
+/// <summary>Timestamp + survivor ranking helpers for consolidate UI / automerge.</summary>
+public static class VaultConsolidateHints
+{
+    public static DateTime? EffectiveTimestampUtc(VaultItem item)
+    {
+        var raw = item.ModifiedAt ?? (item.CreatedAt == default ? null : item.CreatedAt);
+        if (raw is null || raw == default)
+            return null;
+        return raw.Value.Kind switch
+        {
+            DateTimeKind.Utc => raw.Value,
+            DateTimeKind.Local => raw.Value.ToUniversalTime(),
+            _ => DateTime.SpecifyKind(raw.Value, DateTimeKind.Utc)
+        };
+    }
+
+    public static string FormatTimestampLocal(DateTime? utcOrUnspecified)
+    {
+        if (utcOrUnspecified is null || utcOrUnspecified == default)
+            return "—";
+        var local = utcOrUnspecified.Value.Kind == DateTimeKind.Local
+            ? utcOrUnspecified.Value
+            : DateTime.SpecifyKind(utcOrUnspecified.Value, DateTimeKind.Utc).ToLocalTime();
+        return local.ToString("yyyy-MM-dd HH:mm");
+    }
+
+    public static int LinkCount(VaultItem item) =>
+        (item.ExternalLinks ?? Array.Empty<ExternalLink>())
+        .Count(l => !string.IsNullOrWhiteSpace(l.Provider) &&
+                    !string.Equals(l.Provider, "Shared", StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>
+    /// Preferred survivor: most provider links, then newest Updated (else Created).
+    /// Null when fewer than two items or a hard tie on both score legs.
+    /// </summary>
+    public static VaultItem? SuggestSurvivor(IReadOnlyList<VaultItem> items)
+    {
+        if (items.Count < 2)
+            return null;
+
+        var ranked = items
+            .Select(i => (Item: i, Links: LinkCount(i), Ts: EffectiveTimestampUtc(i) ?? DateTime.MinValue))
+            .OrderByDescending(t => t.Links)
+            .ThenByDescending(t => t.Ts)
+            .ThenBy(t => t.Item.Title, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        var best = ranked[0];
+        var second = ranked[1];
+        if (best.Links == second.Links && best.Ts == second.Ts)
+            return best.Item; // stable pick by title after ties
+
+        return best.Item;
+    }
+
+    /// <summary>
+    /// Per-field pick: prefer non-empty value from the newest-dated source; fall back to survivor.
+    /// Notes: if multiple distinct non-empty notes exist, multi-merge them.
+    /// </summary>
+    public static MergeFieldSelection BuildAutomergeSelection(
+        VaultItem survivor,
+        IReadOnlyList<VaultItem> donors)
+    {
+        var all = new List<VaultItem> { survivor };
+        all.AddRange(donors);
+        var selection = new MergeFieldSelection();
+
+        foreach (var field in new[] { "Title", "Username", "Password", "URL", "Notes", "Favorite", "TOTP" })
+        {
+            if (field is "Notes")
+            {
+                var withNotes = all
+                    .Where(i => !string.IsNullOrWhiteSpace(i.Notes))
+                    .Select(i => (i.Id, Text: i.Notes!.Trim()))
+                    .GroupBy(t => t.Text, StringComparer.Ordinal)
+                    .Select(g => g.First().Id)
+                    .ToList();
+                if (withNotes.Count > 1)
+                {
+                    selection.SetMulti("Notes", withNotes);
+                    continue;
+                }
+            }
+
+            var best = all
+                .Select(i => (Item: i, Value: FieldRaw(field, i), Ts: EffectiveTimestampUtc(i) ?? DateTime.MinValue))
+                .Where(t => !string.IsNullOrWhiteSpace(t.Value))
+                .OrderByDescending(t => t.Ts)
+                .ThenByDescending(t => t.Item.Id == survivor.Id)
+                .FirstOrDefault();
+
+            selection.Set(field, best.Item?.Id ?? survivor.Id);
+        }
+
+        return selection;
+    }
+
+    private static string? FieldRaw(string field, VaultItem item) => field switch
+    {
+        "Title" => item.Title,
+        "Username" => item.Username,
+        "Password" => item.Password,
+        "URL" => item.Url,
+        "Notes" => item.Notes,
+        "Favorite" => item.IsFavorite.ToString(),
+        "TOTP" => item.TotpSecret,
+        _ => null
+    };
+}
+
 public sealed class VaultImportService
 {
     private readonly VaultItemService _items = new();
@@ -44,17 +234,27 @@ public sealed class VaultImportService
         foreach (var entry in entries)
         {
             ct.ThrowIfCancellationRequested();
+            if (await IsOriginSuppressedAsync(provider.ProviderId, entry.ExternalId, ct))
+                continue;
+
             var byOrigin = await FindLinkedItemIdAsync(provider.ProviderId, entry.ExternalId, ct);
             if (byOrigin is Guid originId)
             {
-                var item = await _items.GetByIdAsync(originId, ct) ?? new VaultItem { Id = originId };
-                var mismatch = SoftMerge(item, entry, provider.Capabilities.SupportsFavorites);
-                item.IsDeleted = false;
-                await _items.SaveAsync(item, ct, touchModifiedAt: false);
-                await UpsertLinkAsync(item.Id, provider.ProviderId, entry.ExternalId, LinkHash(item), mismatch, ct);
-                IndexItem(indexes, item);
-                imported++;
-                continue;
+                var item = await _items.GetByIdAsync(originId, ct);
+                if (item is null || item.IsDeleted)
+                {
+                    // Stale link on a soft-deleted / missing row — do not resurrect; fall through.
+                    await RemoveLinkAsync(originId, provider.ProviderId, ct);
+                }
+                else
+                {
+                    var mismatch = SoftMerge(item, entry, provider.Capabilities.SupportsFavorites);
+                    await _items.SaveAsync(item, ct, touchModifiedAt: false);
+                    await UpsertLinkAsync(item.Id, provider.ProviderId, entry.ExternalId, LinkHash(item), mismatch, ct);
+                    IndexItem(indexes, item);
+                    imported++;
+                    continue;
+                }
             }
 
             if (TryFindIdentity(indexes, entry, out var vaultId))
@@ -62,14 +262,19 @@ public sealed class VaultImportService
                 var existing = await _items.GetByIdAsync(vaultId, ct);
                 // Same provider already linked under another origin = distinct store rows; don't collapse
                 // (that overwrote ExternalId and false-flagged password conflicts on clean imports).
-                if (existing is not null && !HasProviderLink(existing, provider.ProviderId))
+                if (existing is not null && !existing.IsDeleted && !HasProviderLink(existing, provider.ProviderId))
                 {
                     var mismatch = SoftMerge(existing, entry, provider.Capabilities.SupportsFavorites);
-                    existing.IsDeleted = false;
                     await _items.SaveAsync(existing, ct, touchModifiedAt: false);
                     await UpsertLinkAsync(vaultId, provider.ProviderId, entry.ExternalId, LinkHash(existing), mismatch, ct);
                     IndexItem(indexes, existing);
                     linkedExisting++;
+                    continue;
+                }
+
+                if (existing is not null && !existing.IsDeleted && HasProviderLink(existing, provider.ProviderId))
+                {
+                    await SuppressOriginAsync(provider.ProviderId, entry.ExternalId, existing.Id, ct);
                     continue;
                 }
             }
@@ -119,22 +324,42 @@ public sealed class VaultImportService
         foreach (var entry in entries)
         {
             ct.ThrowIfCancellationRequested();
-            var existingId = await FindLinkedItemIdAsync(provider.ProviderId, entry.ExternalId, ct);
-            if (existingId is not null)
+            if (await IsOriginSuppressedAsync(provider.ProviderId, entry.ExternalId, ct))
                 continue;
+
+            var existingId = await FindLinkedItemIdAsync(provider.ProviderId, entry.ExternalId, ct);
+            if (existingId is Guid linkedId)
+            {
+                var linked = await _items.GetByIdAsync(linkedId, ct);
+                if (linked is not null && !linked.IsDeleted)
+                    continue;
+
+                // Link pointed at soft-deleted / missing item — strip and continue as unlinked.
+                await RemoveLinkAsync(linkedId, provider.ProviderId, ct);
+            }
 
             if (TryFindIdentity(indexes, entry, out var vaultId))
             {
                 var existing = await _items.GetByIdAsync(vaultId, ct);
                 // Same provider already linked under another origin = distinct store rows; don't collapse.
-                if (existing is not null && !HasProviderLink(existing, provider.ProviderId))
+                if (existing is not null && !existing.IsDeleted && !HasProviderLink(existing, provider.ProviderId))
                 {
                     var mismatch = SoftMerge(existing, entry, provider.Capabilities.SupportsFavorites);
-                    existing.IsDeleted = false;
                     await _items.SaveAsync(existing, ct, touchModifiedAt: false);
                     await UpsertLinkAsync(vaultId, provider.ProviderId, entry.ExternalId, LinkHash(existing), mismatch, ct);
                     IndexItem(indexes, existing);
                     linkedExisting++;
+                    continue;
+                }
+
+                // Survivor already has this provider (typical after consolidate dropped a 2nd origin).
+                // Do not spawn a duplicate vault row — suppress and skip.
+                if (existing is not null && !existing.IsDeleted && HasProviderLink(existing, provider.ProviderId))
+                {
+                    await SuppressOriginAsync(provider.ProviderId, entry.ExternalId, existing.Id, ct);
+                    LoggingConfiguration.LogInfo(
+                        $"Skipped re-import of {provider.ProviderId}:{entry.ExternalId} — identity matches {existing.Id} which already has that provider (post-consolidate).",
+                        nameof(VaultImportService));
                     continue;
                 }
             }
@@ -174,8 +399,12 @@ public sealed class VaultImportService
                 continue;
 
             var local = await _items.GetByIdAsync(existingId.Value, ct);
-            if (local is null)
+            if (local is null || local.IsDeleted)
+            {
+                if (local?.IsDeleted == true)
+                    await RemoveLinkAsync(local.Id, provider.ProviderId, ct);
                 continue;
+            }
 
             // Ensure plaintext before SoftMerge — encrypted vault vs provider plaintext false-flags every row.
             var plain = await _items.GetPasswordAsync(local.Id, ct);
@@ -392,6 +621,360 @@ public sealed class VaultImportService
             nameof(VaultImportService));
     }
 
+    /// <summary>
+    /// Merge donor vault rows into <paramref name="survivorId"/>: apply field selection, transfer
+    /// ExternalLinks (drop when survivor already has that provider), soft-delete donors.
+    /// </summary>
+    public async Task<VaultMergeResult> MergeVaultItemsAsync(
+        Guid survivorId,
+        IReadOnlyList<Guid> donorIds,
+        MergeFieldSelection selection,
+        bool updateLinkedSources,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(selection);
+        ArgumentNullException.ThrowIfNull(donorIds);
+
+        var donors = donorIds
+            .Where(id => id != Guid.Empty && id != survivorId)
+            .Distinct()
+            .ToList();
+        if (donors.Count == 0)
+            throw new InvalidOperationException("Select at least one other vault item to merge.");
+
+        var survivor = await _items.GetByIdAsync(survivorId, ct)
+                       ?? throw new InvalidOperationException("Survivor vault item not found.");
+        var donorItems = new List<VaultItem>();
+        foreach (var id in donors)
+        {
+            var donor = await _items.GetByIdAsync(id, ct)
+                        ?? throw new InvalidOperationException($"Donor vault item {id} not found.");
+            if (donor.IsDeleted)
+                throw new InvalidOperationException($"Donor '{donor.Title}' is already deleted.");
+            donorItems.Add(donor);
+        }
+
+        var byId = new Dictionary<Guid, VaultItem> { [survivor.Id] = survivor };
+        foreach (var d in donorItems)
+            byId[d.Id] = d;
+
+        var survivorLinksBefore = await GetLinksForItemAsync(survivorId, ct);
+        var fieldsBefore = ReconcileHistoryService.CaptureSnapshot(survivor);
+        fieldsBefore.Links = survivorLinksBefore
+            .Where(l => !string.IsNullOrWhiteSpace(l.Provider))
+            .Select(l => new ReconcileHistoryService.LinkSnapshot
+            {
+                Provider = l.Provider,
+                ExternalId = l.ExternalId ?? "",
+                IsMismatch = l.IsMismatch,
+                ContentHash = l.ContentHash
+            })
+            .ToList();
+        fieldsBefore.MergedDonors = donorItems.Select(ReconcileHistoryService.CaptureSnapshot).ToList();
+
+        ApplyMergeFields(survivor, byId, selection);
+        await _items.SaveAsync(survivor, ct, touchModifiedAt: true);
+
+        var history = new ReconcileHistoryService();
+
+        var result = new VaultMergeResult
+        {
+            SurvivorId = survivorId,
+            DonorsDeleted = donorItems.Count
+        };
+
+        var survivorProviders = new HashSet<string>(
+            survivorLinksBefore
+                .Where(l => !string.IsNullOrWhiteSpace(l.Provider))
+                .Select(l => l.Provider),
+            StringComparer.OrdinalIgnoreCase);
+
+        foreach (var donor in donorItems)
+        {
+            var links = await GetLinksForItemAsync(donor.Id, ct);
+            foreach (var link in links)
+            {
+                if (string.IsNullOrWhiteSpace(link.Provider) ||
+                    string.Equals(link.Provider, "Shared", StringComparison.OrdinalIgnoreCase))
+                {
+                    await RemoveLinkAsync(donor.Id, link.Provider, ct);
+                    continue;
+                }
+
+                if (survivorProviders.Contains(link.Provider))
+                {
+                    // Same provider already on survivor — dropping this origin must not come back on Sync.
+                    await SuppressOriginAsync(link.Provider, link.ExternalId, survivorId, ct);
+                    await RemoveLinkAsync(donor.Id, link.Provider, ct);
+                    result.LinksDroppedSameProvider++;
+                    result.Messages.Add(
+                        $"Kept survivor's {link.Provider} link; suppressed donor '{donor.Title}' origin from re-import.");
+                    continue;
+                }
+
+                await MoveLinkAsync(donor.Id, survivorId, link.Provider, ct);
+                survivorProviders.Add(link.Provider);
+                result.LinksTransferred++;
+            }
+
+            // Never leave ExternalLinks on a soft-deleted donor — sync FindLinked would resurrect it.
+            await RemoveAllLinksForItemAsync(donor.Id, ct);
+            await _items.DeleteAsync(donor.Id, softDelete: true, ct);
+        }
+
+        await ClearMismatchesForItemAsync(survivorId, ct);
+
+        var fieldSources = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (field, id) in selection.Sources)
+            fieldSources[field] = id == survivorId ? "survivor" : ShortTitle(byId.GetValueOrDefault(id));
+        foreach (var (field, ids) in selection.MultiSources)
+            fieldSources[field] = "merge:" + string.Join("+", ids.Select(id =>
+                id == survivorId ? "survivor" : ShortTitle(byId.GetValueOrDefault(id))));
+        foreach (var field in selection.Overrides.Keys)
+            fieldSources[field] = "edit";
+
+        if (updateLinkedSources)
+        {
+            var reloaded = await _items.GetByIdAsync(survivorId, ct) ?? survivor;
+            result.Push = await PushToLinkedProvidersAsync(reloaded, ct);
+        }
+
+        var summary =
+            $"Merge ← {donorItems.Count} donor(s); links+{result.LinksTransferred}/drop{result.LinksDroppedSameProvider}" +
+            (updateLinkedSources ? "; push=yes" : "; push=no");
+        await history.RecordApplyAsync(
+            survivorId,
+            fieldsBefore,
+            fieldSources,
+            pushedToProviders: updateLinkedSources,
+            providerIds: survivorProviders,
+            summary: summary.Length <= 500 ? summary : summary[..497] + "…",
+            ct: ct);
+
+        ProviderSessionService.Instance.ClearRemoteCache();
+        LoggingConfiguration.LogInfo(
+            $"Merged {donorItems.Count} donor(s) into {survivorId} (links transferred={result.LinksTransferred}, dropped={result.LinksDroppedSameProvider}).",
+            nameof(VaultImportService));
+        return result;
+    }
+
+    /// <summary>
+    /// Suggested duplicate groups: exact username+host (≥2), plus username+registrable-domain cousins
+    /// that span multiple hosts.
+    /// </summary>
+    public static List<ConsolidateSuggestGroup> BuildSuggestedGroups(IEnumerable<VaultItem> items)
+    {
+        var live = items.Where(i => !i.IsDeleted).ToList();
+        var groups = new List<ConsolidateSuggestGroup>();
+        var coveredExact = new HashSet<Guid>();
+
+        var byExact = live
+            .Select(i => (Item: i, Key: UserDomainKey(i.Username, i.Url)))
+            .Where(t => t.Key is not null)
+            .GroupBy(t => t.Key!, StringComparer.OrdinalIgnoreCase)
+            .Where(g => g.Count() >= 2)
+            .OrderByDescending(g => g.Count())
+            .ThenBy(g => g.Key, StringComparer.OrdinalIgnoreCase);
+
+        foreach (var g in byExact)
+        {
+            var list = g.Select(x => x.Item).OrderBy(i => i.Title, StringComparer.OrdinalIgnoreCase).ToList();
+            foreach (var i in list)
+                coveredExact.Add(i.Id);
+            var user = (list[0].Username ?? "").Trim();
+            var host = NormalizeDomain(list[0].Url) ?? "?";
+            groups.Add(new ConsolidateSuggestGroup
+            {
+                Key = "exact:" + g.Key,
+                Label = $"{user} @ {host} ({list.Count})",
+                IsExactHost = true,
+                Items = list
+            });
+        }
+
+        var byReg = live
+            .Select(i =>
+            {
+                var user = (i.Username ?? "").Trim();
+                var host = NormalizeDomain(i.Url);
+                var reg = VaultDomain.RegistrableDomain(host);
+                string? key = null;
+                if (!string.IsNullOrEmpty(user) && !string.IsNullOrEmpty(reg))
+                    key = $"{user}\n{reg}";
+                return (Item: i, Key: key, Host: host, Reg: reg);
+            })
+            .Where(t => t.Key is not null)
+            .GroupBy(t => t.Key!, StringComparer.OrdinalIgnoreCase)
+            .Where(g => g.Count() >= 2)
+            .Where(g => g.Select(x => x.Host).Distinct(StringComparer.OrdinalIgnoreCase).Count() >= 2)
+            .OrderByDescending(g => g.Count())
+            .ThenBy(g => g.Key, StringComparer.OrdinalIgnoreCase);
+
+        foreach (var g in byReg)
+        {
+            var list = g.Select(x => x.Item).OrderBy(i => i.Title, StringComparer.OrdinalIgnoreCase).ToList();
+            // Skip if every member is already in some exact-host group of size ≥2 (noise).
+            if (list.All(i => coveredExact.Contains(i.Id)))
+                continue;
+            var user = (list[0].Username ?? "").Trim();
+            var reg = g.First().Reg ?? "?";
+            groups.Add(new ConsolidateSuggestGroup
+            {
+                Key = "reg:" + g.Key,
+                Label = $"{user} @ *.{reg} ({list.Count})",
+                IsExactHost = false,
+                Items = list
+            });
+        }
+
+        return groups;
+    }
+
+    /// <summary>True when any non-empty donor field differs from survivor (field picker needed).</summary>
+    public static bool MergeNeedsFieldResolve(VaultItem survivor, IReadOnlyList<VaultItem> donors)
+    {
+        foreach (var donor in donors)
+        {
+            if (FieldDiffers(survivor.Title, donor.Title) ||
+                FieldDiffers(survivor.Username, donor.Username) ||
+                FieldDiffers(survivor.Password, donor.Password) ||
+                FieldDiffers(survivor.Url, donor.Url) ||
+                FieldDiffers(survivor.Notes, donor.Notes) ||
+                FieldDiffers(survivor.TotpSecret, donor.TotpSecret) ||
+                survivor.IsFavorite != donor.IsFavorite)
+                return true;
+        }
+
+        return false;
+    }
+
+    public static string? PublicUserDomainKey(string? username, string? url) => UserDomainKey(username, url);
+
+    private static bool FieldDiffers(string? a, string? b)
+    {
+        var left = (a ?? "").Trim();
+        var right = (b ?? "").Trim();
+        if (string.IsNullOrEmpty(right))
+            return false;
+        if (string.IsNullOrEmpty(left))
+            return true;
+        return !string.Equals(left, right, StringComparison.Ordinal);
+    }
+
+    private static void ApplyMergeFields(
+        VaultItem survivor,
+        IReadOnlyDictionary<Guid, VaultItem> byId,
+        MergeFieldSelection selection)
+    {
+        static string? Raw(string field, VaultItem src) => field switch
+        {
+            "Title" => src.Title,
+            "Username" => src.Username,
+            "Password" => src.Password,
+            "URL" => src.Url,
+            "Notes" => src.Notes,
+            "TOTP" => src.TotpSecret,
+            "Favorite" => src.IsFavorite.ToString(),
+            _ => null
+        };
+
+        string? Pick(string field)
+        {
+            if (selection.TryGetOverride(field, out var edited) && edited is not null)
+                return edited;
+
+            if (selection.TryGetMulti(field, out var ids) && ids.Count > 0)
+            {
+                var parts = new List<string>();
+                var seen = new HashSet<string>(StringComparer.Ordinal);
+                foreach (var id in ids)
+                {
+                    if (!byId.TryGetValue(id, out var src))
+                        continue;
+                    var raw = (Raw(field, src) ?? "").Trim();
+                    if (string.IsNullOrEmpty(raw) || !seen.Add(raw))
+                        continue;
+                    parts.Add(raw);
+                }
+
+                if (parts.Count == 0)
+                    return null;
+                // Notes / multi-line friendly; single-line fields join with " | ".
+                return field is "Notes"
+                    ? string.Join(Environment.NewLine + Environment.NewLine, parts)
+                    : string.Join(" | ", parts);
+            }
+
+            var pickId = selection.Get(field, survivor.Id);
+            if (!byId.TryGetValue(pickId, out var one))
+                one = survivor;
+            return Raw(field, one);
+        }
+
+        survivor.Title = Pick("Title") ?? survivor.Title ?? "";
+        survivor.Username = Pick("Username");
+        survivor.Password = Pick("Password");
+        survivor.Url = Pick("URL");
+        survivor.Notes = Pick("Notes");
+        var totp = Pick("TOTP");
+        if (!string.IsNullOrWhiteSpace(totp))
+            survivor.TotpSecret = totp;
+        if (bool.TryParse(Pick("Favorite"), out var fav))
+            survivor.IsFavorite = fav;
+    }
+
+    private static string ShortTitle(VaultItem? item)
+    {
+        var t = (item?.Title ?? "").Trim();
+        return string.IsNullOrEmpty(t) ? "donor" : (t.Length <= 24 ? t : t[..21] + "…");
+    }
+
+    private static async Task MoveLinkAsync(
+        Guid fromItemId,
+        Guid toItemId,
+        string provider,
+        CancellationToken ct)
+    {
+        async Task Move(DbContext db)
+        {
+            var links = db.Set<ExternalLink>();
+            var link = await links.FirstOrDefaultAsync(
+                l => l.ItemId == fromItemId && l.Provider == provider, ct);
+            if (link is null)
+                return;
+
+            var clash = await links.FirstOrDefaultAsync(
+                l => l.ItemId == toItemId && l.Provider == provider, ct);
+            if (clash is not null)
+            {
+                links.Remove(link);
+            }
+            else
+            {
+                link.ItemId = toItemId;
+                link.LastSyncedAt = DateTime.UtcNow;
+            }
+
+            await db.SaveChangesAsync(ct);
+        }
+
+        if (!ConnectionConfig.IsOfflineMode)
+        {
+            await using var db = new AuthenticatorDbContext();
+            await Move(db);
+        }
+
+        try
+        {
+            await using var offline = new OfflineVaultDbContext();
+            await Move(offline);
+        }
+        catch (Exception ex)
+        {
+            LoggingConfiguration.LogException(ex, "Offline move ExternalLink failed.", nameof(VaultImportService));
+        }
+    }
+
     /// <summary>Clear IsMismatch on every ExternalLink for a vault item (after reconcile apply).</summary>
     public async Task ClearMismatchesForItemAsync(Guid itemId, CancellationToken ct = default)
     {
@@ -606,28 +1189,146 @@ public sealed class VaultImportService
         if (string.IsNullOrEmpty(norm))
             return null;
 
-        List<ExternalLink> links;
-        if (ConnectionConfig.IsOfflineMode)
+        // Prefer a live (non-deleted) vault row. Soft-deleted donors must not win origin lookup.
+        async Task<Guid?> FindInDb(DbContext db)
         {
-            await using var offline = new OfflineVaultDbContext();
-            links = await offline.ExternalLinks.AsNoTracking()
+            var links = await db.Set<ExternalLink>().AsNoTracking()
                 .Where(l => l.Provider == provider)
                 .ToListAsync(ct);
-        }
-        else
-        {
-            await using var db = new AuthenticatorDbContext();
-            links = await db.ExternalLinks.AsNoTracking()
-                .Where(l => l.Provider == provider)
-                .ToListAsync(ct);
-        }
-
-        return links.FirstOrDefault(l =>
+            var match = links.FirstOrDefault(l =>
                 string.Equals(
                     ProviderSessionService.NormalizeExternalId(l.ExternalId),
                     norm,
-                    StringComparison.Ordinal))
-            ?.ItemId;
+                    StringComparison.Ordinal));
+            if (match is null)
+                return null;
+
+            var live = await db.Set<VaultItem>().AsNoTracking()
+                .Where(i => i.Id == match.ItemId && !i.IsDeleted)
+                .Select(i => (Guid?)i.Id)
+                .FirstOrDefaultAsync(ct);
+            return live;
+        }
+
+        if (ConnectionConfig.IsOfflineMode)
+        {
+            await using var offline = new OfflineVaultDbContext();
+            return await FindInDb(offline);
+        }
+
+        await using var shared = new AuthenticatorDbContext();
+        return await FindInDb(shared);
+    }
+
+    private static async Task SuppressOriginAsync(
+        string provider,
+        string? externalId,
+        Guid mergedIntoItemId,
+        CancellationToken ct)
+    {
+        var raw = (externalId ?? "").Trim();
+        var norm = ProviderSessionService.NormalizeExternalId(raw);
+        if (string.IsNullOrWhiteSpace(provider) || string.IsNullOrEmpty(norm))
+            return;
+
+        async Task Upsert(DbContext db)
+        {
+            var set = db.Set<SuppressedExternalOrigin>();
+            var existing = await set.FirstOrDefaultAsync(
+                s => s.Provider == provider && s.ExternalIdNormalized == norm, ct);
+            if (existing is null)
+            {
+                set.Add(new SuppressedExternalOrigin
+                {
+                    Provider = provider,
+                    ExternalIdNormalized = norm,
+                    ExternalIdRaw = raw,
+                    MergedIntoItemId = mergedIntoItemId,
+                    CreatedAtUtc = DateTime.UtcNow
+                });
+            }
+            else
+            {
+                existing.MergedIntoItemId = mergedIntoItemId;
+                existing.ExternalIdRaw = raw;
+                existing.CreatedAtUtc = DateTime.UtcNow;
+            }
+
+            await db.SaveChangesAsync(ct);
+        }
+
+        if (!ConnectionConfig.IsOfflineMode)
+        {
+            await using var db = new AuthenticatorDbContext();
+            await Upsert(db);
+        }
+
+        try
+        {
+            await new OfflineVaultService().EnsureCreatedAsync(ct);
+            await using var offline = new OfflineVaultDbContext();
+            await Upsert(offline);
+        }
+        catch (Exception ex)
+        {
+            LoggingConfiguration.LogException(ex, "Offline suppress origin failed.", nameof(VaultImportService));
+        }
+    }
+
+    private static async Task<bool> IsOriginSuppressedAsync(
+        string provider,
+        string? externalId,
+        CancellationToken ct)
+    {
+        var norm = ProviderSessionService.NormalizeExternalId(externalId);
+        if (string.IsNullOrWhiteSpace(provider) || string.IsNullOrEmpty(norm))
+            return false;
+
+        async Task<bool> Exists(DbContext db) =>
+            await db.Set<SuppressedExternalOrigin>().AsNoTracking()
+                .AnyAsync(s => s.Provider == provider && s.ExternalIdNormalized == norm, ct);
+
+        try
+        {
+            if (ConnectionConfig.IsOfflineMode)
+            {
+                await new OfflineVaultService().EnsureCreatedAsync(ct);
+                await using var offline = new OfflineVaultDbContext();
+                return await Exists(offline);
+            }
+
+            await using var db = new AuthenticatorDbContext();
+            return await Exists(db);
+        }
+        catch (Exception ex)
+        {
+            LoggingConfiguration.LogException(ex, "Suppress origin lookup failed.", nameof(VaultImportService));
+            return false;
+        }
+    }
+
+    private static async Task RemoveAllLinksForItemAsync(Guid itemId, CancellationToken ct)
+    {
+        async Task Wipe(DbContext db)
+        {
+            await db.Set<ExternalLink>().Where(l => l.ItemId == itemId).ExecuteDeleteAsync(ct);
+        }
+
+        if (!ConnectionConfig.IsOfflineMode)
+        {
+            await using var db = new AuthenticatorDbContext();
+            await Wipe(db);
+        }
+
+        try
+        {
+            await using var offline = new OfflineVaultDbContext();
+            await Wipe(offline);
+        }
+        catch (Exception ex)
+        {
+            LoggingConfiguration.LogException(ex, "Offline remove-all links failed.", nameof(VaultImportService));
+        }
     }
 
     private sealed class IdentityIndexes

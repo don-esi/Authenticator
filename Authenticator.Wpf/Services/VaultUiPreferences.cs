@@ -20,10 +20,18 @@ public enum VaultGroupMode
     Username
 }
 
+public enum VaultConsolidateMode
+{
+    Suggested,
+    Board,
+    Select
+}
+
 public sealed class VaultUiPreferencesState
 {
     public VaultSortMode SortMode { get; set; } = VaultSortMode.TitleAsc;
     public VaultGroupMode GroupMode { get; set; } = VaultGroupMode.None;
+    public VaultConsolidateMode ConsolidateMode { get; set; } = VaultConsolidateMode.Suggested;
 }
 
 public sealed class VaultUiPreferences

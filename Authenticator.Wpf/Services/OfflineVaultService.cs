@@ -40,6 +40,34 @@ public sealed class OfflineVaultService
         await EnsureEquivalentDomainsColumnAsync(db, ct);
         await EnsureDomainEquivalenceGroupsTableAsync(db, ct);
         await EnsureReconcileHistoryTableAsync(db, ct);
+        await EnsureSuppressedExternalOriginsTableAsync(db, ct);
+    }
+
+    private static async Task EnsureSuppressedExternalOriginsTableAsync(OfflineVaultDbContext db, CancellationToken ct)
+    {
+        try
+        {
+            await db.Database.ExecuteSqlRawAsync(
+                """
+                CREATE TABLE IF NOT EXISTS SuppressedExternalOrigins (
+                  Id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+                  Provider TEXT NOT NULL,
+                  ExternalIdNormalized TEXT NOT NULL,
+                  ExternalIdRaw TEXT NULL,
+                  MergedIntoItemId TEXT NOT NULL,
+                  CreatedAtUtc TEXT NOT NULL
+                );
+                CREATE UNIQUE INDEX IF NOT EXISTS IX_SuppressedExternalOrigins_Provider_Ext
+                  ON SuppressedExternalOrigins (Provider, ExternalIdNormalized);
+                CREATE INDEX IF NOT EXISTS IX_SuppressedExternalOrigins_MergedInto
+                  ON SuppressedExternalOrigins (MergedIntoItemId);
+                """,
+                ct);
+        }
+        catch (Exception ex)
+        {
+            LoggingConfiguration.LogException(ex, "Failed to ensure offline SuppressedExternalOrigins table.", nameof(OfflineVaultService));
+        }
     }
 
     private static async Task EnsureEquivalentDomainsColumnAsync(OfflineVaultDbContext db, CancellationToken ct)

@@ -245,5 +245,24 @@ public sealed class VaultMigrationService
               CREATE INDEX IX_ReconcileHistory_CreatedAtUtc ON dbo.ReconcileHistory (CreatedAtUtc);
             END
             """, ct);
+
+        await db.Database.ExecuteSqlRawAsync(
+            """
+            IF OBJECT_ID(N'dbo.SuppressedExternalOrigins', N'U') IS NULL
+            BEGIN
+              CREATE TABLE dbo.SuppressedExternalOrigins (
+                Id int IDENTITY(1,1) NOT NULL PRIMARY KEY,
+                Provider nvarchar(50) NOT NULL,
+                ExternalIdNormalized nvarchar(200) NOT NULL,
+                ExternalIdRaw nvarchar(200) NULL,
+                MergedIntoItemId uniqueidentifier NOT NULL,
+                CreatedAtUtc datetime2 NOT NULL
+              );
+              CREATE UNIQUE INDEX IX_SuppressedExternalOrigins_Provider_Ext
+                ON dbo.SuppressedExternalOrigins (Provider, ExternalIdNormalized);
+              CREATE INDEX IX_SuppressedExternalOrigins_MergedInto
+                ON dbo.SuppressedExternalOrigins (MergedIntoItemId);
+            END
+            """, ct);
     }
 }

@@ -1145,6 +1145,18 @@ public partial class VaultView : UserControl
             _ = ReloadAfterReconcileAsync();
     }
 
+    private async Task OpenConsolidateAsync()
+    {
+        var win = new ConsolidateWindow { Owner = Window.GetWindow(this) };
+        // ShowDialog is modal; after it returns, reload without nesting awaits that can
+        // re-enter while focus-save continuations from the closed dialog still run.
+        var changed = win.ShowDialog() == true || win.MergedAny;
+        if (!changed)
+            return;
+        await Dispatcher.Yield(DispatcherPriority.Background);
+        await ReloadAfterReconcileAsync();
+    }
+
     private static MenuItem MakeMenu(string header, Action action)
     {
         var item = new MenuItem { Header = header };
@@ -1401,6 +1413,13 @@ public partial class VaultView : UserControl
         menu.Items.Add(MakeMenu("Connect to…", () => _ = ConnectToProviderAsync()));
         menu.Items.Add(MakeMenu("Import from…", () => _ = ImportFromProviderAsync()));
         menu.Items.Add(MakeMenu("Reconcile history…", () => OpenReconcileHistory()));
+
+        var suggestCount = VaultImportService.BuildSuggestedGroups(_all).Count;
+        menu.Items.Add(MakeMenu(
+            suggestCount > 0
+                ? $"Consolidate duplicates ({suggestCount})…"
+                : "Consolidate duplicates…",
+            () => _ = OpenConsolidateAsync()));
 
         var conflictCount = _allRowsView.Count(r => r.HasMismatch);
         if (conflictCount > 0)
