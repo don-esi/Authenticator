@@ -271,14 +271,54 @@
 				</ScrollViewer>
 			</syncfusion:GroupBarItem>
 
+			<syncfusion:GroupBarItem HeaderText="Equivalent domains">
+				<ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Padding="0,0,2,0">
+					<StackPanel Margin="8">
+						<TextBlock Margin="0,0,0,12" Foreground="{DynamicResource SecondaryTextBrush}" TextWrapping="Wrap"
+							Text="Global groups of hosts that share logins (e.g. x.ai, grok.com, cursor.sh). Any vault URL on a member host matches the whole set for Auto-fill and Relevant. Per-login “Also match domains” on a vault item still works independently." />
+						<syncfusion:ButtonAdv Margin="0,0,0,12" Label="Add group" Click="AddDomainGroup_Click" SizeMode="Normal"
+							AutomationProperties.Name="Add equivalent domain group" />
+						<ItemsControl x:Name="DomainGroupsList">
+							<ItemsControl.ItemTemplate>
+								<DataTemplate>
+									<Border Margin="0,0,0,8" Padding="10,8" Background="{DynamicResource CardBackgroundBrush}"
+										BorderBrush="{DynamicResource BorderBrushColor}" BorderThickness="1" CornerRadius="8">
+										<Grid>
+											<Grid.ColumnDefinitions>
+												<ColumnDefinition Width="*" />
+												<ColumnDefinition Width="Auto" />
+												<ColumnDefinition Width="Auto" />
+											</Grid.ColumnDefinitions>
+											<StackPanel>
+												<TextBlock FontWeight="SemiBold" Foreground="{DynamicResource PrimaryTextBrush}"
+													Text="{Binding Name}" TextWrapping="Wrap" />
+												<TextBlock Margin="0,4,0,0" FontSize="12" Foreground="{DynamicResource SecondaryTextBrush}"
+													Text="{Binding DomainsSummary}" TextWrapping="Wrap" />
+											</StackPanel>
+											<syncfusion:ButtonAdv Grid.Column="1" Margin="8,0,0,0" Label="Edit" SizeMode="Normal"
+												Click="EditDomainGroup_Click" Tag="{Binding Id}"
+												AutomationProperties.Name="Edit domain group" />
+											<syncfusion:ButtonAdv Grid.Column="2" Margin="8,0,0,0" Label="Delete" SizeMode="Normal"
+												Click="DeleteDomainGroup_Click" Tag="{Binding Id}"
+												AutomationProperties.Name="Delete domain group" />
+										</Grid>
+									</Border>
+								</DataTemplate>
+							</ItemsControl.ItemTemplate>
+						</ItemsControl>
+						<TextBlock x:Name="DomainGroupsStatus" Margin="0,4,0,0" Foreground="{DynamicResource SecondaryTextBrush}" TextWrapping="Wrap" />
+					</StackPanel>
+				</ScrollViewer>
+			</syncfusion:GroupBarItem>
+
 			<syncfusion:GroupBarItem HeaderText="Browser autofill">
 				<ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Padding="0,0,2,0">
 					<StackPanel Margin="8">
 						<TextBlock Margin="0,0,0,12" Foreground="{DynamicResource SecondaryTextBrush}" TextWrapping="Wrap"
-							Text="Web autofill requires the Authenticator extension in Chrome/Edge/Firefox. It will not appear until you Load unpacked. Enable Auto-fill on the vault login, keep Authenticator unlocked, then open the site." />
-						<TextBlock Margin="0,0,0,8" FontWeight="SemiBold" Foreground="{DynamicResource PrimaryTextBrush}" Text="Install" />
+							Text="Web autofill uses the Authenticator extension (Chrome/Edge/Firefox) plus the native host. The Setup installer tries to force-install the Chromium extension; if it does not appear, Load unpacked from the folder below. Enable Auto-fill on the vault login, keep Authenticator unlocked, then open the site." />
+						<TextBlock Margin="0,0,0,8" FontWeight="SemiBold" Foreground="{DynamicResource PrimaryTextBrush}" Text="Install / fallback" />
 						<TextBlock Margin="0,0,0,12" Foreground="{DynamicResource SecondaryTextBrush}" TextWrapping="Wrap"
-							Text="1) Open the extension folder below&#10;2) Chrome: chrome://extensions → Developer mode ON → Load unpacked → select that folder&#10;3) Pin “Authenticator Vault” from the puzzle menu&#10;4) Click the icon — popup should say Connected when the vault is unlocked" />
+							Text="1) Open the extension folder below&#10;2) Chrome/Edge: extensions page → Developer mode ON → Load unpacked → select that folder (if force-install did not apply)&#10;3) Pin “Authenticator Vault” from the puzzle menu&#10;4) Click the icon — popup lists logins when several match; Connected when the vault is unlocked&#10;5) Firefox: temporary add-on from the same folder (store listing later)" />
 						<syncfusion:ButtonAdv Margin="0,0,0,8" Label="Open extension folder" Click="OpenBrowserExtensionFolder_Click" SizeMode="Normal"
 							AutomationProperties.Name="Open extension folder" />
 						<syncfusion:ButtonAdv Margin="0,0,0,8" Label="Copy extension folder path" Click="CopyBrowserExtensionPath_Click" SizeMode="Normal"

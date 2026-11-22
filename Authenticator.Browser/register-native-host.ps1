@@ -2,7 +2,7 @@
 # Prefers published self-contained win-x64 output (required for Chrome's minimal PATH).
 param(
     [string]$NativeHostExe = "",
-    [string]$ChromeExtensionId = "apolfgjbnoelcpahldnnlmbjnbfjleil",
+    [string]$ChromeExtensionId = "bfcajmeodjdgaomgpanlihipagjkmlih",
     [string]$FirefoxExtensionId = "authenticator@local"
 )
 
@@ -16,6 +16,9 @@ if (-not $NativeHostExe) {
         Join-Path $repo "Authenticator.NativeHost\bin\Release\net11.0-windows\win-x64\Authenticator.NativeHost.exe"
         Join-Path $repo "Authenticator.NativeHost\bin\Release\net11.0\win-x64\publish\Authenticator.NativeHost.exe"
         Join-Path $repo "Authenticator.NativeHost\bin\Release\net11.0\win-x64\Authenticator.NativeHost.exe"
+        # Installed layout next to WPF: {app}\NativeHost\...
+        Join-Path $repo "NativeHost\Authenticator.NativeHost.exe"
+        Join-Path (Split-Path $root -Parent) "NativeHost\Authenticator.NativeHost.exe"
     )
     $NativeHostExe = $candidates | Where-Object { Test-Path $_ } | Select-Object -First 1
 }

@@ -58,7 +58,8 @@ WealthForge may mirror the same `connection.json` shape and probe protocol.
 - Interactive MFA UI for remaining cloud providers (Bitwarden/Dashlane/etc. still JSON façade; LastPass Connect/Import prompts OTP/YubiKey like WealthForge)
 - Always-on discovery helper when Host app is closed
 - Unify 2FA Folders with VaultFolders
-- **G10/G11 harden:** ranked host match for Relevant + per-entry **Auto-fill** / **Auto-login**. **Web autofill** is the Chrome/Edge/Firefox extension (`Authenticator.Browser`) via native messaging + `VaultNativePipeServer` (UIA fill abandoned for browser pages).
+- **G10/G11 harden (done this cycle):** ranked host match for Relevant + per-entry **Auto-fill** / **Auto-login**. **Web autofill** via Chrome/Edge/Firefox extension (`Authenticator.Browser`) + native messaging + `VaultNativePipeServer`. Popup picker for ambiguous matches; Inno ships NativeHost + unpacked Browser (optional CRX + best-effort `ExtensionInstallForcelist`; Load unpacked fallback); equivalent domains per-login + Settings global groups.
+- **Deferred:** Chrome/Edge/Firefox **store listing**; Firefox signed XPI / AMO; reliable silent CRX install without enterprise update HTTPS.
 - **Next cycle — Diff try-selection:** from Diff, auto-test the current field selection (open site URL in browser → auto-login/fill attempt) so the user can see whether that password/source worked before Apply
 
 ## Reconcile / consolidate (G6+)

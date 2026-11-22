@@ -80,33 +80,8 @@ async function tryAutoFill(tabId, url) {
   lastFillKey = key;
 
   const item = items[0];
-  try {
-    await api.tabs.sendMessage(tabId, {
-      type: "fillLogin",
-      username: item.username || "",
-      password: item.password || "",
-      allowAutoLogin: !!item.allowAutoLogin
-    });
-    setBadge("✓", "#15803D");
-  } catch (_) {
-    // Content script may not be ready — inject and retry once.
-    try {
-      await api.scripting.executeScript({
-        target: { tabId },
-        files: ["content.js"]
-      });
-      await api.tabs.sendMessage(tabId, {
-        type: "fillLogin",
-        username: item.username || "",
-        password: item.password || "",
-        allowAutoLogin: !!item.allowAutoLogin
-      });
-      setBadge("✓", "#15803D");
-    } catch (e2) {
-      setBadge("x", "#B91C1C");
-      lastFillKey = "";
-    }
-  }
+  const filled = await fillTab(tabId, item);
+  if (!filled) lastFillKey = "";
 }
 
 api.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
@@ -130,12 +105,47 @@ api.tabs.onActivated.addListener(async (activeInfo) => {
   }
 });
 
+async function fillTab(tabId, item) {
+  const payload = {
+    type: "fillLogin",
+    username: item.username || "",
+    password: item.password || "",
+    allowAutoLogin: !!item.allowAutoLogin
+  };
+
+  try {
+    await api.tabs.sendMessage(tabId, payload);
+    setBadge("✓", "#15803D");
+    return true;
+  } catch (_) {
+    try {
+      await api.scripting.executeScript({
+        target: { tabId },
+        files: ["content.js"]
+      });
+      await api.tabs.sendMessage(tabId, payload);
+      setBadge("✓", "#15803D");
+      return true;
+    } catch (_) {
+      setBadge("x", "#B91C1C");
+      return false;
+    }
+  }
+}
+
 api.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg && msg.type === "spaNavigated" && sender.tab && sender.tab.id != null) {
     lastFillKey = "";
     tryAutoFill(sender.tab.id, msg.url || sender.tab.url);
     sendResponse({ ok: true });
+    return false;
   }
+
+  if (msg && msg.type === "fillSelected" && msg.tabId != null) {
+    fillTab(msg.tabId, msg).then((ok) => sendResponse({ ok }));
+    return true;
+  }
+
   return false;
 });
 

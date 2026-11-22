@@ -371,7 +371,7 @@ public sealed class VaultItemService
 
     public static string ContentHash(VaultItem item)
     {
-        var payload = $"{item.Title}|{item.Username}|{item.Password}|{item.Url}|{item.Notes}|{item.PayloadJson}|{item.IsFavorite}|{item.ItemType}";
+        var payload = $"{item.Title}|{item.Username}|{item.Password}|{item.Url}|{item.EquivalentDomains}|{item.Notes}|{item.PayloadJson}|{item.IsFavorite}|{item.ItemType}";
         var hash = SHA256.HashData(Encoding.UTF8.GetBytes(payload));
         return Convert.ToHexString(hash).ToLowerInvariant();
     }

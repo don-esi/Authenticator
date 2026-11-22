@@ -69,6 +69,8 @@ public partial class SettingsView : UserControl
     private readonly AccountImportService _import = new();
     private readonly DebugPreferences _debugPrefs = new();
     private readonly VaultItemService _vaultItems = new();
+    private readonly DomainEquivalenceService _domainGroups = new();
+    private List<DomainGroupRow> _domainGroupRows = new();
     private bool _loading = true;
     private bool _busy;
     private bool _helloAvailable;
@@ -113,6 +115,7 @@ public partial class SettingsView : UserControl
             RefreshConnectionUi();
             RefreshUnlockSummary();
             RefreshDeveloperUi();
+            await RefreshDomainGroupsAsync();
         }
         catch (Exception ex)
         {
@@ -123,6 +126,112 @@ public partial class SettingsView : UserControl
         {
             _loading = false;
         }
+    }
+
+    private async Task RefreshDomainGroupsAsync()
+    {
+        try
+        {
+            var groups = await _domainGroups.ListAsync();
+            _domainGroupRows = groups.Select(g => new DomainGroupRow
+            {
+                Id = g.Id,
+                Name = g.Name,
+                DomainsSummary = string.Join(", ", DomainEquivalenceService.ParseDomainsJson(g.DomainsJson))
+            }).ToList();
+            DomainGroupsList.ItemsSource = _domainGroupRows;
+            DomainGroupsStatus.Text = _domainGroupRows.Count == 0
+                ? "No groups yet — add one for shared hosts across logins."
+                : $"{_domainGroupRows.Count} group(s).";
+        }
+        catch (Exception ex)
+        {
+            LoggingConfiguration.LogException(ex, "Failed to load domain equivalence groups.", nameof(SettingsView));
+            DomainGroupsStatus.Text = ex.Message;
+        }
+    }
+
+    private async void AddDomainGroup_Click(object sender, RoutedEventArgs e)
+    {
+        var win = new DomainEquivalenceEditWindow { Owner = Window.GetWindow(this) };
+        if (win.ShowDialog() == true)
+            await RefreshDomainGroupsAsync();
+    }
+
+    private static bool TryGetDomainGroupId(object sender, out int id)
+    {
+        id = 0;
+        if (sender is not FrameworkElement fe || fe.Tag is null)
+            return false;
+        switch (fe.Tag)
+        {
+            case int i:
+                id = i;
+                return true;
+            case long l:
+                id = (int)l;
+                return true;
+            case string s:
+                return int.TryParse(s, out id);
+            default:
+                return int.TryParse(fe.Tag.ToString(), out id);
+        }
+    }
+
+    private async void EditDomainGroup_Click(object sender, RoutedEventArgs e)
+    {
+        if (!TryGetDomainGroupId(sender, out var id))
+            return;
+        try
+        {
+            var groups = await _domainGroups.ListAsync();
+            var existing = groups.FirstOrDefault(g => g.Id == id);
+            if (existing is null)
+            {
+                DomainGroupsStatus.Text = "Group not found.";
+                return;
+            }
+
+            var win = new DomainEquivalenceEditWindow(existing) { Owner = Window.GetWindow(this) };
+            if (win.ShowDialog() == true)
+                await RefreshDomainGroupsAsync();
+        }
+        catch (Exception ex)
+        {
+            DomainGroupsStatus.Text = ex.Message;
+        }
+    }
+
+    private async void DeleteDomainGroup_Click(object sender, RoutedEventArgs e)
+    {
+        if (!TryGetDomainGroupId(sender, out var id))
+            return;
+        var row = _domainGroupRows.FirstOrDefault(r => r.Id == id);
+        var label = row?.Name ?? $"#{id}";
+        if (!AppDialog.Confirm(
+                Window.GetWindow(this),
+                $"Delete equivalent domain group “{label}”?",
+                "Equivalent domains",
+                confirmText: "Delete",
+                kind: AppDialogKind.Warning))
+            return;
+
+        try
+        {
+            await _domainGroups.DeleteAsync(id);
+            await RefreshDomainGroupsAsync();
+        }
+        catch (Exception ex)
+        {
+            DomainGroupsStatus.Text = ex.Message;
+        }
+    }
+
+    private sealed class DomainGroupRow
+    {
+        public int Id { get; set; }
+        public string Name { get; set; } = "";
+        public string DomainsSummary { get; set; } = "";
     }
 
     private void RefreshDeveloperUi()
@@ -1106,6 +1215,11 @@ public partial class SettingsView : UserControl
 
     private static string? FindBrowserExtensionFolder()
     {
+        // Installed layout: {app}\Browser\manifest.json
+        var installed = Path.Combine(AppContext.BaseDirectory, "Browser");
+        if (File.Exists(Path.Combine(installed, "manifest.json")))
+            return installed;
+
         var dir = new DirectoryInfo(AppContext.BaseDirectory);
         for (var i = 0; i < 8 && dir is not null; i++, dir = dir.Parent)
         {

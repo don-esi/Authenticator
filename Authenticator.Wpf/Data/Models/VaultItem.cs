@@ -35,6 +35,11 @@ public class VaultItem
     /// <summary>Login URL — nvarchar(max); LastPass OAuth/state URLs routinely exceed 1000 chars.</summary>
     public string? Url { get; set; }
 
+    /// <summary>
+    /// Extra hosts this login also matches (newline or comma separated), e.g. x.ai, grok.com.
+    /// </summary>
+    public string? EquivalentDomains { get; set; }
+
     public int? LinkedAccountId { get; set; }
 
     [ForeignKey(nameof(LinkedAccountId))]

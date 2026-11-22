@@ -208,14 +208,23 @@ public sealed class VaultNativePipeServer : IDisposable
         LastExtensionHost = captured;
         TabHostChanged?.Invoke(this, captured);
 
+        Guid? requestedId = null;
+        if (root.TryGetProperty("itemId", out var idEl))
+        {
+            var idText = idEl.ValueKind == JsonValueKind.String ? idEl.GetString() : idEl.ToString();
+            if (!string.IsNullOrWhiteSpace(idText) && Guid.TryParse(idText, out var parsed))
+                requestedId = parsed;
+        }
+
         var vault = new VaultItemService();
+        var equivalence = await DomainEquivalenceService.LoadSnapshotAsync(ct).ConfigureAwait(false);
         var all = await vault.GetItemsAsync(revealSecrets: false, ct: ct).ConfigureAwait(false);
         var scored = new List<(VaultItem Item, int Score)>();
         foreach (var item in all)
         {
             if (item.ItemType != VaultItemType.Login || !item.AllowAutoFill)
                 continue;
-            var score = VaultDomain.ScoreMatch(captured, item.Url);
+            var score = VaultDomain.ScoreItemMatch(captured, item.Url, item.EquivalentDomains, equivalence);
             if (score <= 0)
                 continue;
             scored.Add((item, score));
@@ -224,10 +233,37 @@ public sealed class VaultNativePipeServer : IDisposable
         var exact = scored.Where(s => s.Score == 100).ToList();
         if (exact.Count == 0)
             return JsonSerializer.Serialize(new { ok = false, reason = "no_match" }, JsonOptions);
-        if (exact.Count > 1)
-            return JsonSerializer.Serialize(new { ok = false, reason = "ambiguous" }, JsonOptions);
 
-        var chosen = exact[0].Item;
+        if (requestedId is Guid pickId)
+        {
+            var picked = exact.FirstOrDefault(s => s.Item.Id == pickId);
+            if (picked.Item is null)
+                return JsonSerializer.Serialize(new { ok = false, reason = "no_match" }, JsonOptions);
+            return await RevealCredentialAsync(vault, picked.Item, picked.Score, ct).ConfigureAwait(false);
+        }
+
+        if (exact.Count > 1)
+        {
+            return JsonSerializer.Serialize(new
+            {
+                ok = false,
+                reason = "ambiguous",
+                candidates = exact.Select(s => new
+                {
+                    id = s.Item.Id.ToString("D"),
+                    title = s.Item.Title ?? "",
+                    username = s.Item.Username ?? "",
+                    score = s.Score
+                }).ToArray()
+            }, JsonOptions);
+        }
+
+        return await RevealCredentialAsync(vault, exact[0].Item, exact[0].Score, ct).ConfigureAwait(false);
+    }
+
+    private static async Task<string> RevealCredentialAsync(
+        VaultItemService vault, VaultItem chosen, int score, CancellationToken ct)
+    {
         var full = await vault.GetByIdAsync(chosen.Id, revealSecrets: true, revealPassword: true, ct).ConfigureAwait(false);
         if (full is null)
             return JsonSerializer.Serialize(new { ok = false, reason = "no_match" }, JsonOptions);
@@ -249,7 +285,7 @@ public sealed class VaultNativePipeServer : IDisposable
                     username = full.Username ?? "",
                     password = full.Password ?? "",
                     allowAutoLogin = full.AllowAutoLogin,
-                    score = 100
+                    score
                 }
             }
         }, JsonOptions);

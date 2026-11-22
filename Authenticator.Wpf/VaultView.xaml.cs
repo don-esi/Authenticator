@@ -45,6 +45,7 @@ public partial class VaultView : UserControl
     private string? _autoFilter;
     private IReadOnlyList<string> _autoMatchTerms = Array.Empty<string>();
     private string? _capturedHost;
+    private DomainEquivalenceSnapshot? _domainEquivalence;
     private IntPtr _foregroundHwnd;
     private bool _autoFillInFlight;
     private bool _chipSync;
@@ -140,6 +141,7 @@ public partial class VaultView : UserControl
         {
             LoadUiPrefs();
             _passwordIndex = null;
+            _domainEquivalence = await DomainEquivalenceService.LoadSnapshotAsync();
             // List path: no secret decrypt — filter/tab switches must stay cheap.
             _all = await _vault.GetItemsAsync(favoritesOnly: false, revealSecrets: false);
             var rows = _all.Select(VaultRow.From).ToList();
@@ -607,8 +609,10 @@ public partial class VaultView : UserControl
         // Domain path: scored host match only (no title-token false positives).
         if (!string.IsNullOrWhiteSpace(_capturedHost))
         {
+            var equivalence = _domainEquivalence ?? DomainEquivalenceSnapshot.Empty;
             foreach (var row in _allRowsView)
-                row.DomainScore = VaultDomain.ScoreMatch(_capturedHost, row.Host);
+                row.DomainScore = VaultDomain.ScoreItemMatch(
+                    _capturedHost, row.Url, row.EquivalentDomains, equivalence);
 
             return _allRowsView
                 .Where(r => r.DomainScore > 0)
@@ -671,7 +675,7 @@ public partial class VaultView : UserControl
             if (ForegroundWindowMonitor.IsWeakToken(term) && !term.Contains('.'))
                 continue;
 
-            if (!string.IsNullOrEmpty(r.Host) && VaultDomain.ScoreMatch(term, r.Host) > 0)
+            if (VaultDomain.ScoreItemMatch(term, r.Url, r.EquivalentDomains) > 0)
                 return true;
 
             if (HasWholeWord(r.SortTitle, term) ||
@@ -1737,6 +1741,7 @@ public partial class VaultView : UserControl
             get => _url;
             set { if (_url == value) return; _url = value; Notify(nameof(Url)); }
         }
+        public string? EquivalentDomains { get; set; }
         public string GroupKey { get; set; } = "";
         /// <summary>Lowercased title/username/host/url blob for partial relevance matching.</summary>
         public string MatchBlob { get; set; } = "";
@@ -1815,6 +1820,7 @@ public partial class VaultView : UserControl
             SortTitle = other.SortTitle;
             Host = other.Host;
             Url = other.Url;
+            EquivalentDomains = other.EquivalentDomains;
             GroupKey = other.GroupKey;
             MatchBlob = other.MatchBlob;
             MatchTokens = other.MatchTokens;
@@ -1836,6 +1842,7 @@ public partial class VaultView : UserControl
         public static VaultRow From(VaultItem item)
         {
             var host = VaultDomain.NormalizeDomain(item.Url) ?? "";
+            var alts = VaultDomain.ParseDomainList(item.EquivalentDomains);
             var username = item.Username?.Trim() ?? "";
             var subtitle = !string.IsNullOrWhiteSpace(host) ? host : item.Title;
             // Secondary line: username when present, otherwise host (never duplicate the title).
@@ -1846,9 +1853,10 @@ public partial class VaultView : UserControl
                 item.Username,
                 item.Url,
                 host,
+                string.Join(' ', alts),
                 host.Contains('.') ? host.Split('.')[0] : "").ToLowerInvariant();
             var tokens = ForegroundWindowMonitor.StrongMatchTerms(
-                new[] { item.Title, item.Username ?? "", item.Url ?? "", host });
+                new[] { item.Title, item.Username ?? "", item.Url ?? "", host }.Concat(alts));
             var mismatchProviders = item.ExternalLinks?
                 .Where(l => l.IsMismatch && !string.IsNullOrWhiteSpace(l.Provider))
                 .Select(l => l.Provider)
@@ -1865,6 +1873,7 @@ public partial class VaultView : UserControl
                 SortTitle = item.Title,
                 Host = host,
                 Url = item.Url,
+                EquivalentDomains = item.EquivalentDomains,
                 MatchBlob = blob,
                 MatchTokens = tokens.ToArray(),
                 MismatchProviders = mismatchProviders,

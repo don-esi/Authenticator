@@ -31,6 +31,7 @@ public partial class AuthenticatorDbContext : DbContext
     public DbSet<ExternalLink> ExternalLinks { get; set; } = null!;
     public DbSet<OfflineChangeQueueEntry> OfflineChangeQueue { get; set; } = null!;
     public DbSet<ReconcileHistoryEntry> ReconcileHistory { get; set; } = null!;
+    public DbSet<DomainEquivalenceGroup> DomainEquivalenceGroups { get; set; } = null!;
 
     public static string ConnectionString => ConnectionConfig.ConnectionString;
 
@@ -138,6 +139,11 @@ public partial class AuthenticatorDbContext : DbContext
             entity.HasIndex(e => e.ItemId);
             entity.HasIndex(e => e.CreatedAtUtc);
             entity.HasIndex(e => e.UndoneAtUtc);
+        });
+
+        modelBuilder.Entity<DomainEquivalenceGroup>(entity =>
+        {
+            entity.HasIndex(e => e.Name);
         });
 
         modelBuilder.Entity<AppSettings>().HasData(new AppSettings

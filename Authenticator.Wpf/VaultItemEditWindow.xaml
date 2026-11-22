@@ -110,6 +110,23 @@
 							Margin="0,0,0,12"
 							AutomationProperties.Name="URL" />
 
+						<TextBlock Text="Also match domains" Style="{StaticResource DialogLabel}" />
+						<TextBox x:Name="EquivalentDomainsBox"
+							Style="{StaticResource DialogInput}"
+							Height="64"
+							TextWrapping="Wrap"
+							AcceptsReturn="True"
+							VerticalScrollBarVisibility="Auto"
+							VerticalContentAlignment="Top"
+							Margin="0,0,0,4"
+							AutomationProperties.Name="Also match domains"
+							ToolTip="Extra hosts this login matches (one per line), e.g. x.ai and grok.com." />
+						<TextBlock Margin="0,0,0,12"
+							FontSize="12"
+							Foreground="{DynamicResource SecondaryTextBrush}"
+							TextWrapping="Wrap"
+							Text="One host per line (or comma-separated). Used with Auto-fill / Relevant matching." />
+
 						<TextBlock Text="Linked sources (origin ids)" Style="{StaticResource DialogLabel}" />
 						<TextBlock x:Name="LinkedSourcesText"
 							FontSize="12"

@@ -409,6 +409,151 @@ begin
     EnableSqlFirewallRules;
 end;
 
+function FileToUrlPath(const Path: String): String;
+begin
+  Result := Path;
+  StringChangeEx(Result, '\', '/', True);
+  Result := 'file:///' + Result;
+end;
+
+function WriteNativeHostManifests: Boolean;
+var
+  Dir, HostExe, ChromiumManifest, FirefoxManifest, Json: String;
+begin
+  Result := False;
+  Dir := ExpandConstant('{localappdata}\Authenticator\native-messaging');
+  if not ForceDirectories(Dir) then
+  begin
+    Log('Failed to create native-messaging dir: ' + Dir);
+    Exit;
+  end;
+
+  HostExe := ExpandConstant('{app}\NativeHost\Authenticator.NativeHost.exe');
+  if not FileExists(HostExe) then
+  begin
+    Log('Native host exe missing: ' + HostExe);
+    Exit;
+  end;
+
+  ChromiumManifest := Dir + '\com.authenticator.native.chromium.json';
+  FirefoxManifest := Dir + '\com.authenticator.native.firefox.json';
+
+  Json :=
+    '{' + #13#10 +
+    '  "name": "com.authenticator.native",' + #13#10 +
+    '  "description": "Authenticator vault native messaging host",' + #13#10 +
+    '  "path": "' + JsonEscape(HostExe) + '",' + #13#10 +
+    '  "type": "stdio",' + #13#10 +
+    '  "allowed_origins": [' + #13#10 +
+    '    "chrome-extension://bfcajmeodjdgaomgpanlihipagjkmlih/"' + #13#10 +
+    '  ]' + #13#10 +
+    '}';
+  if not SaveStringToFile(ChromiumManifest, Json, False) then
+  begin
+    Log('Failed to write ' + ChromiumManifest);
+    Exit;
+  end;
+
+  Json :=
+    '{' + #13#10 +
+    '  "name": "com.authenticator.native",' + #13#10 +
+    '  "description": "Authenticator vault native messaging host",' + #13#10 +
+    '  "path": "' + JsonEscape(HostExe) + '",' + #13#10 +
+    '  "type": "stdio",' + #13#10 +
+    '  "allowed_extensions": [' + #13#10 +
+    '    "authenticator@local"' + #13#10 +
+    '  ]' + #13#10 +
+    '}';
+  if not SaveStringToFile(FirefoxManifest, Json, False) then
+  begin
+    Log('Failed to write ' + FirefoxManifest);
+    Exit;
+  end;
+
+  if not RegWriteStringValue(HKCU, 'Software\Google\Chrome\NativeMessagingHosts\com.authenticator.native', '', ChromiumManifest) then
+    Log('Failed to register Chrome native messaging host');
+  if not RegWriteStringValue(HKCU, 'Software\Microsoft\Edge\NativeMessagingHosts\com.authenticator.native', '', ChromiumManifest) then
+    Log('Failed to register Edge native messaging host');
+  if not RegWriteStringValue(HKCU, 'Software\Mozilla\NativeMessagingHosts\com.authenticator.native', '', FirefoxManifest) then
+    Log('Failed to register Firefox native messaging host');
+
+  Log('Registered native messaging host → ' + HostExe);
+  Result := True;
+end;
+
+function RewriteBrowserUpdatesXml: Boolean;
+var
+  UpdatesPath, CrxPath, Content, Codebase: String;
+begin
+  Result := False;
+  UpdatesPath := ExpandConstant('{app}\Browser\updates.xml');
+  CrxPath := ExpandConstant('{app}\Browser\AuthenticatorVault.crx');
+  if not FileExists(UpdatesPath) then
+  begin
+    Log('updates.xml missing; skipping force-install prep');
+    Exit;
+  end;
+
+  if not FileExists(CrxPath) then
+  begin
+    Log('CRX missing; force-install skipped (Load unpacked fallback)');
+    Exit;
+  end;
+
+  if not LoadStringFromFile(UpdatesPath, Content) then
+  begin
+    Log('Could not read updates.xml');
+    Exit;
+  end;
+
+  Codebase := FileToUrlPath(CrxPath);
+  StringChangeEx(Content, '__CRX_CODEBASE__', Codebase, True);
+  if not SaveStringToFile(UpdatesPath, Content, False) then
+  begin
+    Log('Could not rewrite updates.xml');
+    Exit;
+  end;
+
+  Log('Rewrote updates.xml codebase → ' + Codebase);
+  Result := True;
+end;
+
+function TryForceInstallChromiumExtension: Boolean;
+var
+  UpdatesPath, Entry: String;
+begin
+  Result := False;
+  UpdatesPath := ExpandConstant('{app}\Browser\updates.xml');
+  if not FileExists(ExpandConstant('{app}\Browser\AuthenticatorVault.crx')) then
+  begin
+    Log('No CRX — skipping ExtensionInstallForcelist');
+    Exit;
+  end;
+  if not RewriteBrowserUpdatesXml then
+    Exit;
+
+  Entry := 'bfcajmeodjdgaomgpanlihipagjkmlih;' + FileToUrlPath(UpdatesPath);
+
+  { Best-effort HKLM policies; consumer Chrome often ignores file:// update URLs. }
+  if RegWriteStringValue(HKLM64, 'Software\Policies\Google\Chrome\ExtensionInstallForcelist', '1', Entry) then
+    Log('Wrote Chrome ExtensionInstallForcelist')
+  else
+    Log('Could not write Chrome ExtensionInstallForcelist (need admin / policy)');
+
+  if RegWriteStringValue(HKLM32, 'Software\Policies\Google\Chrome\ExtensionInstallForcelist', '1', Entry) then
+    Log('Wrote Chrome ExtensionInstallForcelist (32-bit view)');
+
+  if RegWriteStringValue(HKLM64, 'Software\Policies\Microsoft\Edge\ExtensionInstallForcelist', '1', Entry) then
+    Log('Wrote Edge ExtensionInstallForcelist')
+  else
+    Log('Could not write Edge ExtensionInstallForcelist');
+
+  if RegWriteStringValue(HKLM32, 'Software\Policies\Microsoft\Edge\ExtensionInstallForcelist', '1', Entry) then
+    Log('Wrote Edge ExtensionInstallForcelist (32-bit view)');
+
+  Result := True;
+end;
+
 procedure CurStepChanged(CurStep: TSetupStep);
 begin
   if CurStep = ssPostInstall then
@@ -419,5 +564,11 @@ begin
         'Create %LocalAppData%\Authenticator\connection.json or use Settings → Connection.',
         mbError,
         MB_OK);
+
+    if not WriteNativeHostManifests then
+      Log('Native host registration failed — use Settings → Browser autofill → Register native host.');
+
+    if not TryForceInstallChromiumExtension then
+      Log('Chromium force-install skipped — use Settings → Browser autofill → Load unpacked from {app}\Browser.');
   end;
 end;

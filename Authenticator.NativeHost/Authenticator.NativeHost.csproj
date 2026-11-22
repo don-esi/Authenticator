@@ -7,6 +7,10 @@
     <Nullable>enable</Nullable>
     <AssemblyName>Authenticator.NativeHost</AssemblyName>
     <RootNamespace>Authenticator.NativeHost</RootNamespace>
+    <Version>1.1.0</Version>
+    <AssemblyVersion>1.1.0.0</AssemblyVersion>
+    <FileVersion>1.1.0.0</FileVersion>
+    <InformationalVersion>1.1.0</InformationalVersion>
     <!-- Chrome launches this with a minimal PATH — ship a self-contained apphost. -->
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <SelfContained>true</SelfContained>

@@ -25,6 +25,7 @@ public sealed class OfflineVaultDbContext : DbContext
     public DbSet<ExternalLink> ExternalLinks { get; set; } = null!;
     public DbSet<OfflineChangeQueueEntry> OfflineChangeQueue { get; set; } = null!;
     public DbSet<ReconcileHistoryEntry> ReconcileHistory { get; set; } = null!;
+    public DbSet<DomainEquivalenceGroup> DomainEquivalenceGroups { get; set; } = null!;
 
     protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
     {
@@ -63,5 +64,6 @@ public sealed class OfflineVaultDbContext : DbContext
             e.HasIndex(x => x.CreatedAtUtc);
             e.Ignore(x => x.ItemTitle);
         });
+        modelBuilder.Entity<DomainEquivalenceGroup>(e => e.HasIndex(x => x.Name));
     }
 }

@@ -97,6 +97,7 @@ public sealed class VaultMigrationService
                 Username nvarchar(300) NULL,
                 Password nvarchar(max) NULL,
                 Url nvarchar(max) NULL,
+                EquivalentDomains nvarchar(max) NULL,
                 LinkedAccountId int NULL,
                 TotpSecret nvarchar(max) NULL,
                 PayloadJson nvarchar(max) NULL,
@@ -150,6 +151,30 @@ public sealed class VaultMigrationService
                   AND CHARACTER_MAXIMUM_LENGTH < 4000)
             BEGIN
               ALTER TABLE dbo.VaultItems ALTER COLUMN Url nvarchar(max) NULL;
+            END
+            """, ct);
+
+        await db.Database.ExecuteSqlRawAsync(
+            """
+            IF OBJECT_ID(N'dbo.VaultItems', N'U') IS NOT NULL
+               AND COL_LENGTH(N'dbo.VaultItems', N'EquivalentDomains') IS NULL
+            BEGIN
+              ALTER TABLE dbo.VaultItems ADD EquivalentDomains nvarchar(max) NULL;
+            END
+            """, ct);
+
+        await db.Database.ExecuteSqlRawAsync(
+            """
+            IF OBJECT_ID(N'dbo.DomainEquivalenceGroups', N'U') IS NULL
+            BEGIN
+              CREATE TABLE dbo.DomainEquivalenceGroups (
+                Id int IDENTITY(1,1) NOT NULL PRIMARY KEY,
+                Name nvarchar(200) NOT NULL,
+                DomainsJson nvarchar(max) NOT NULL,
+                CreatedAt datetime2 NOT NULL,
+                ModifiedAt datetime2 NULL
+              );
+              CREATE INDEX IX_DomainEquivalenceGroups_Name ON dbo.DomainEquivalenceGroups (Name);
             END
             """, ct);
 

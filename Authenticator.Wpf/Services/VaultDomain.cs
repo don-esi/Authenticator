@@ -52,9 +52,12 @@ public static class VaultDomain
 
     /// <summary>
     /// Score how well <paramref name="vaultHost"/> matches a captured browser host.
-    /// 100 exact, 80 registrable domain, 60 registrable label, 0 none.
+    /// 100 exact (or global equivalence), 80 registrable domain, 60 registrable label, 0 none.
     /// </summary>
-    public static int ScoreMatch(string? capturedHost, string? vaultHost)
+    public static int ScoreMatch(
+        string? capturedHost,
+        string? vaultHost,
+        DomainEquivalenceSnapshot? equivalence = null)
     {
         var captured = NormalizeDomain(capturedHost);
         var vault = NormalizeDomain(vaultHost);
@@ -64,12 +67,21 @@ public static class VaultDomain
         if (string.Equals(captured, vault, StringComparison.OrdinalIgnoreCase))
             return 100;
 
+        if (equivalence is not null && equivalence.AreEquivalent(captured, vault))
+            return 100;
+
         var capReg = RegistrableDomain(StripPort(captured));
         var vaultReg = RegistrableDomain(StripPort(vault));
         if (capReg is not null &&
             vaultReg is not null &&
             string.Equals(capReg, vaultReg, StringComparison.OrdinalIgnoreCase))
             return 80;
+
+        if (equivalence is not null &&
+            capReg is not null &&
+            vaultReg is not null &&
+            equivalence.AreEquivalent(capReg, vaultReg))
+            return 100;
 
         var capLabel = RegistrableLabel(capReg);
         var vaultLabel = RegistrableLabel(vaultReg);
@@ -81,6 +93,52 @@ public static class VaultDomain
 
         return 0;
     }
+
+    /// <summary>
+    /// Best score across primary URL, per-item equivalent domains, and global groups.
+    /// </summary>
+    public static int ScoreItemMatch(
+        string? capturedHost,
+        string? primaryUrl,
+        string? equivalentDomainsText,
+        DomainEquivalenceSnapshot? equivalence = null)
+    {
+        var best = ScoreMatch(capturedHost, primaryUrl, equivalence);
+        foreach (var alt in ParseDomainList(equivalentDomainsText))
+        {
+            var score = ScoreMatch(capturedHost, alt, equivalence);
+            if (score > best)
+                best = score;
+        }
+
+        return best;
+    }
+
+    public static IReadOnlyList<string> ParseDomainList(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return Array.Empty<string>();
+
+        var parts = text.Split(new[] { '\r', '\n', ',', ';', ' ' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        return NormalizeDomainList(parts);
+    }
+
+    public static IReadOnlyList<string> NormalizeDomainList(IEnumerable<string?> raw)
+    {
+        var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var list = new List<string>();
+        foreach (var item in raw)
+        {
+            var n = NormalizeDomain(item);
+            if (n is null || !set.Add(n))
+                continue;
+            list.Add(n);
+        }
+        return list;
+    }
+
+    public static string FormatDomainList(IEnumerable<string?> domains) =>
+        string.Join(Environment.NewLine, NormalizeDomainList(domains));
 
     public static string? RegistrableDomain(string? host)
     {

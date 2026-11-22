@@ -1,0 +1,74 @@
+<Window x:Class="Authenticator.DomainEquivalenceEditWindow"
+	xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+	xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+	Title="Equivalent domains"
+	Width="440"
+	Height="420"
+	MinWidth="400"
+	MinHeight="360"
+	WindowStartupLocation="CenterOwner"
+	ShowInTaskbar="False"
+	Background="{DynamicResource PageBackgroundBrush}"
+	Foreground="{DynamicResource PrimaryTextBrush}"
+	FontFamily="Segoe UI"
+	FontSize="14">
+	<Grid>
+		<Grid.RowDefinitions>
+			<RowDefinition Height="Auto" />
+			<RowDefinition Height="*" />
+		</Grid.RowDefinitions>
+
+		<Border Style="{StaticResource DialogHeader}">
+			<Grid>
+				<Button Content="Cancel"
+					HorizontalAlignment="Left"
+					IsCancel="True"
+					Style="{StaticResource TextActionButton}"
+					AutomationProperties.Name="Cancel"
+					Click="Cancel_Click" />
+				<TextBlock x:Name="TitleText"
+					Text="Equivalent domains"
+					FontSize="17"
+					FontWeight="SemiBold"
+					HorizontalAlignment="Center"
+					VerticalAlignment="Center" />
+				<Button Content="Save"
+					HorizontalAlignment="Right"
+					IsDefault="True"
+					Style="{StaticResource TextActionButton}"
+					FontWeight="SemiBold"
+					AutomationProperties.Name="Save"
+					Click="Save_Click" />
+			</Grid>
+		</Border>
+
+		<ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" Padding="16,12,16,16">
+			<StackPanel>
+				<Border Style="{StaticResource DialogCard}">
+					<StackPanel>
+						<TextBlock Text="Name" Style="{StaticResource DialogLabel}" />
+						<TextBox x:Name="NameBox"
+							Style="{StaticResource DialogInput}"
+							Margin="0,0,0,12"
+							AutomationProperties.Name="Group name" />
+
+						<TextBlock Text="Domains" Style="{StaticResource DialogLabel}" />
+						<TextBox x:Name="DomainsBox"
+							Style="{StaticResource DialogInput}"
+							Height="160"
+							TextWrapping="Wrap"
+							AcceptsReturn="True"
+							VerticalScrollBarVisibility="Auto"
+							VerticalContentAlignment="Top"
+							Margin="0,0,0,8"
+							AutomationProperties.Name="Domains" />
+						<TextBlock FontSize="12"
+							Foreground="{DynamicResource SecondaryTextBrush}"
+							TextWrapping="Wrap"
+							Text="One host per line (or comma-separated). Example: x.ai, grok.com, cursor.sh — vault URLs on any of these match the whole set." />
+					</StackPanel>
+				</Border>
+			</StackPanel>
+		</ScrollViewer>
+	</Grid>
+</Window>

@@ -36,6 +36,7 @@ public partial class VaultItemEditWindow : Window
         TitleBox.Text = item.Title;
         UserBox.Text = item.Username ?? "";
         UrlBox.Text = item.Url ?? "";
+        EquivalentDomainsBox.Text = VaultDomain.FormatDomainList(VaultDomain.ParseDomainList(item.EquivalentDomains));
         NotesBox.Text = item.Notes ?? "";
         TotpBox.Text = item.TotpSecret ?? "";
         LinkedBox.Text = item.LinkedAccountId?.ToString() ?? "";
@@ -165,6 +166,8 @@ public partial class VaultItemEditWindow : Window
         _item.Title = TitleBox.Text.Trim();
         _item.Username = UserBox.Text.Trim();
         _item.Url = UrlBox.Text.Trim();
+        var alts = VaultDomain.ParseDomainList(EquivalentDomainsBox.Text);
+        _item.EquivalentDomains = alts.Count == 0 ? null : VaultDomain.FormatDomainList(alts);
         _item.Notes = NotesBox.Text;
         _item.TotpSecret = string.IsNullOrWhiteSpace(TotpBox.Text) ? null : TotpBox.Text.Trim();
         _item.IsFavorite = FavoriteCheck.IsChecked == true;

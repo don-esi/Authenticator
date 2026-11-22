@@ -1,9 +1,9 @@
 {
   "manifest_version": 3,
   "name": "Authenticator Vault",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Auto-fill logins from the local Authenticator vault (Chrome, Edge, Firefox).",
-  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA1tLL97coUm5ybNqwocIOe/8jlnV2kk1BzwesqRBIFtDbiJlz9w5nWtd8Uo2+FpO7rM2f+vugYmV45k+30mgVo/oLX4VZVtt2Zlw7Zuh1/dtYFZB+BILDlYwMufv6zA7TQjwnb9LTH7ltcaJ9egGO3HaaBOUtaGKcG0BlGKmxUjbJ6pdZey/hv319hl6KrnCmVa7yuG2hSHGGf2gE7Uhu+etBk+DORagwuVtfhcaaw//q9PDRuTota3ZINFaysfMnRkTf69+EYWFgUf7uPfGj3hx5XiGOVfahFwcCsCXUVEoG/a/xBqM5pC557HCBkvi6TxpzeuXXba/TwJg46s1/JQIDAQAB",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA2+Td0AgpzEhapAOmJoPG/49inp1Lid9jfKtFAeOJBFyAwy0Y3/CvfRf9q7f67Q1ebDD7xJSrm/RxcuwlN8lFDHS8dhx3yhfo2b2WmMQg42B0R8+dSDAKuo+f32uEGLE5neKJX5ENjmrBZhA1T08P8oB/3I0rgfgN+GS3u5aetAonreR9pdma2LDQFOVRF68ybke6dmvge1xJNumFJgwmmqBPozHk7I+Y7YdJZeIVEwHULwEJOmHmKrZasseWYzb6cB/eGRDo0d/XIbXi1x3da/Gn3vKTlrSmeArGzsmvp0sb7YbwuKkc09/oDnckMThdf5InftnM+XnWi4wR88vQFQIDAQAB",
   "browser_specific_settings": {
     "gecko": {
       "id": "authenticator@local",
@@ -25,8 +25,13 @@
   },
   "content_scripts": [
     {
-      "matches": ["http://*/*", "https://*/*"],
-      "js": ["content.js"],
+      "matches": [
+        "http://*/*",
+        "https://*/*"
+      ],
+      "js": [
+        "content.js"
+      ],
       "run_at": "document_idle",
       "all_frames": false
     }

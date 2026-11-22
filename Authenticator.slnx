@@ -7,4 +7,5 @@
   <Project Path="Authenticator.Crypto/Authenticator.Crypto.csproj" />
   <Project Path="Authenticator.NativeHost/Authenticator.NativeHost.csproj" />
   <Project Path="Authenticator.Wpf/Authenticator.Wpf.csproj" />
+  <Project Path="packaging/GenerateChromePem/GenerateChromePem.csproj" />
 </Solution>

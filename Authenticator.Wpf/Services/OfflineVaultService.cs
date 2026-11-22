@@ -37,7 +37,47 @@ public sealed class OfflineVaultService
         await db.Database.EnsureCreatedAsync(ct);
         await EnsureLastUsedAtColumnAsync(db, ct);
         await EnsureAutoFillColumnsAsync(db, ct);
+        await EnsureEquivalentDomainsColumnAsync(db, ct);
+        await EnsureDomainEquivalenceGroupsTableAsync(db, ct);
         await EnsureReconcileHistoryTableAsync(db, ct);
+    }
+
+    private static async Task EnsureEquivalentDomainsColumnAsync(OfflineVaultDbContext db, CancellationToken ct)
+    {
+        try
+        {
+            if (await OfflineColumnExistsAsync(db, "VaultItems", "EquivalentDomains", ct))
+                return;
+            await db.Database.ExecuteSqlRawAsync(
+                "ALTER TABLE VaultItems ADD COLUMN EquivalentDomains TEXT NULL", ct);
+        }
+        catch (Exception ex)
+        {
+            LoggingConfiguration.LogException(ex, "Failed to ensure offline VaultItems.EquivalentDomains column.", nameof(OfflineVaultService));
+        }
+    }
+
+    private static async Task EnsureDomainEquivalenceGroupsTableAsync(OfflineVaultDbContext db, CancellationToken ct)
+    {
+        try
+        {
+            await db.Database.ExecuteSqlRawAsync(
+                """
+                CREATE TABLE IF NOT EXISTS DomainEquivalenceGroups (
+                  Id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+                  Name TEXT NOT NULL,
+                  DomainsJson TEXT NOT NULL,
+                  CreatedAt TEXT NOT NULL,
+                  ModifiedAt TEXT NULL
+                );
+                CREATE INDEX IF NOT EXISTS IX_DomainEquivalenceGroups_Name ON DomainEquivalenceGroups (Name);
+                """,
+                ct);
+        }
+        catch (Exception ex)
+        {
+            LoggingConfiguration.LogException(ex, "Failed to ensure offline DomainEquivalenceGroups table.", nameof(OfflineVaultService));
+        }
     }
 
     private static async Task EnsureReconcileHistoryTableAsync(OfflineVaultDbContext db, CancellationToken ct)
@@ -181,6 +221,7 @@ public sealed class OfflineVaultService
                 .Where(i => !i.IsDeleted)
                 .ToListAsync(ct);
             var crypto = await shared.VaultCrypto.AsNoTracking().FirstOrDefaultAsync(ct);
+            var domainGroups = await shared.DomainEquivalenceGroups.AsNoTracking().ToListAsync(ct);
 
             await local.Database.ExecuteSqlRawAsync("DELETE FROM ExternalLinks", ct);
             await local.Database.ExecuteSqlRawAsync("DELETE FROM VaultCustomFields", ct);
@@ -190,6 +231,7 @@ public sealed class OfflineVaultService
             await local.Database.ExecuteSqlRawAsync("DELETE FROM Accounts", ct);
             await local.Database.ExecuteSqlRawAsync("DELETE FROM Folders", ct);
             await local.Database.ExecuteSqlRawAsync("DELETE FROM VaultCrypto", ct);
+            await local.Database.ExecuteSqlRawAsync("DELETE FROM DomainEquivalenceGroups", ct);
 
             if (crypto is not null) local.VaultCrypto.Add(crypto);
             local.Folders.AddRange(folders);
@@ -200,7 +242,19 @@ public sealed class OfflineVaultService
             {
                 local.VaultItems.Add(item);
             }
+            foreach (var g in domainGroups)
+            {
+                local.DomainEquivalenceGroups.Add(new DomainEquivalenceGroup
+                {
+                    Id = g.Id,
+                    Name = g.Name,
+                    DomainsJson = g.DomainsJson,
+                    CreatedAt = g.CreatedAt,
+                    ModifiedAt = g.ModifiedAt
+                });
+            }
             await local.SaveChangesAsync(ct);
+            DomainEquivalenceService.InvalidateCache();
             WriteSeedFingerprint(fingerprint);
             LoggingConfiguration.LogInfo("Offline vault seeded from shared SQL.", nameof(OfflineVaultService));
         }
@@ -217,6 +271,7 @@ public sealed class OfflineVaultService
         var codeCount = await shared.BackupCodes.AsNoTracking().CountAsync(c => !c.IsDeleted, ct);
         var vaultFolderCount = await shared.VaultFolders.AsNoTracking().CountAsync(ct);
         var itemCount = await shared.VaultItems.AsNoTracking().CountAsync(i => !i.IsDeleted, ct);
+        var domainGroupCount = await shared.DomainEquivalenceGroups.AsNoTracking().CountAsync(ct);
         var latestItem = await shared.VaultItems.AsNoTracking()
             .Where(i => !i.IsDeleted)
             .Select(i => i.ModifiedAt ?? i.CreatedAt)
@@ -227,12 +282,16 @@ public sealed class OfflineVaultService
             .Select(a => a.ModifiedAt ?? a.CreatedAt)
             .OrderByDescending(d => d)
             .FirstOrDefaultAsync(ct);
+        var latestDomainGroup = await shared.DomainEquivalenceGroups.AsNoTracking()
+            .Select(g => g.ModifiedAt ?? g.CreatedAt)
+            .OrderByDescending(d => d)
+            .FirstOrDefaultAsync(ct);
         var cryptoFp = await shared.VaultCrypto.AsNoTracking()
             .Select(c => c.VdekFingerprint)
             .FirstOrDefaultAsync(ct) ?? "";
 
         var payload =
-            $"{ConnectionConfig.Server}|{ConnectionConfig.Database}|{accountCount}|{folderCount}|{codeCount}|{vaultFolderCount}|{itemCount}|{latestItem:O}|{latestAccount:O}|{cryptoFp}";
+            $"{ConnectionConfig.Server}|{ConnectionConfig.Database}|{accountCount}|{folderCount}|{codeCount}|{vaultFolderCount}|{itemCount}|{domainGroupCount}|{latestItem:O}|{latestAccount:O}|{latestDomainGroup:O}|{cryptoFp}";
         var hash = SHA256.HashData(Encoding.UTF8.GetBytes(payload));
         return Convert.ToHexString(hash);
     }
@@ -341,6 +400,7 @@ public sealed class OfflineVaultService
                     item.Username,
                     item.Password,
                     item.Url,
+                    item.EquivalentDomains,
                     item.Notes,
                     item.PayloadJson,
                     item.IsFavorite,
@@ -461,6 +521,7 @@ public sealed class OfflineVaultService
                                 item.Username = dto.Username;
                                 item.Password = dto.Password;
                                 item.Url = dto.Url;
+                                item.EquivalentDomains = dto.EquivalentDomains;
                                 item.Notes = dto.Notes;
                                 item.PayloadJson = dto.PayloadJson;
                                 item.IsFavorite = dto.IsFavorite;
@@ -500,6 +561,7 @@ public sealed class OfflineVaultService
         Username = item.Username,
         Password = item.Password,
         Url = item.Url,
+        EquivalentDomains = item.EquivalentDomains,
         LinkedAccountId = item.LinkedAccountId,
         TotpSecret = item.TotpSecret,
         PayloadJson = item.PayloadJson,
@@ -518,6 +580,7 @@ public sealed class OfflineVaultService
         public string? Username { get; set; }
         public string? Password { get; set; }
         public string? Url { get; set; }
+        public string? EquivalentDomains { get; set; }
         public string? Notes { get; set; }
         public string? PayloadJson { get; set; }
         public bool IsFavorite { get; set; }
