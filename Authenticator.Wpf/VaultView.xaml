@@ -134,7 +134,7 @@
 							</Border>
 						</Grid>
 
-						<!-- Title prominent; username muted. Click row copies username. -->
+						<!-- Title prominent; username muted. Click copies username; double-click opens URL. -->
 						<StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="0,0,8,0">
 							<TextBlock Text="{Binding SortTitle}" FontSize="16" FontWeight="SemiBold"
 									   Foreground="{DynamicResource PrimaryTextBrush}"

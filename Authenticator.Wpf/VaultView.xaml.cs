@@ -1,5 +1,7 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
+using System.Diagnostics;
+using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
@@ -55,6 +57,8 @@ public partial class VaultView : UserControl
     private Point _slideStart;
     private double _slideOriginX;
     private bool _slideMoved;
+    private Guid? _lastRowClickId;
+    private DateTime _lastRowClickUtc;
 
     public VaultView()
     {
@@ -780,7 +784,7 @@ public partial class VaultView : UserControl
         {
             CloseOpenSlide();
             if (front.DataContext is VaultRow row)
-                CopyUsername(row);
+                HandleRowClick(row);
             return;
         }
 
@@ -922,6 +926,31 @@ public partial class VaultView : UserControl
         e.Handled = true;
     }
 
+    /// <summary>
+    /// Single click copies username; rapid second click on the same row opens URL.
+    /// Uses system double-click time — ClickCount is unreliable after CaptureMouse.
+    /// </summary>
+    private void HandleRowClick(VaultRow row)
+    {
+        var now = DateTime.UtcNow;
+        var isDouble = _lastRowClickId == row.Id &&
+                       (now - _lastRowClickUtc).TotalMilliseconds <= GetDoubleClickTime();
+        _lastRowClickId = row.Id;
+        _lastRowClickUtc = now;
+
+        if (isDouble)
+        {
+            _lastRowClickId = null;
+            LaunchItemUrl(row);
+            return;
+        }
+
+        CopyUsername(row);
+    }
+
+    [DllImport("user32.dll")]
+    private static extern uint GetDoubleClickTime();
+
     private async void CopyUsername(VaultRow row)
     {
         // Username is on the list row — no secret decrypt.
@@ -935,6 +964,42 @@ public partial class VaultView : UserControl
         ClipboardHelper.Copy(username);
         ShowStatusToast("Username copied");
         await MarkUsedAsync(row.Id);
+    }
+
+    private void LaunchItemUrl(VaultRow row)
+    {
+        var url = row.Url;
+        if (string.IsNullOrWhiteSpace(url))
+            url = _all.FirstOrDefault(i => i.Id == row.Id)?.Url;
+        if (string.IsNullOrWhiteSpace(url) || !LooksLikeUrl(url))
+        {
+            ShowStatusToast("No URL");
+            return;
+        }
+
+        try
+        {
+            var launch = url.Contains("://", StringComparison.Ordinal) ? url.Trim() : "https://" + url.Trim();
+            Process.Start(new ProcessStartInfo { FileName = launch, UseShellExecute = true });
+            ShowStatusToast("Opened site");
+            _ = MarkUsedAsync(row.Id);
+        }
+        catch (Exception ex)
+        {
+            LoggingConfiguration.LogException(ex, $"Failed to open URL for vault item {row.Id}.", nameof(VaultView));
+            AppDialog.Alert(Window.GetWindow(this), ex.Message, "Open site", AppDialogKind.Warning);
+        }
+    }
+
+    private static bool LooksLikeUrl(string? value)
+    {
+        var raw = (value ?? "").Trim();
+        if (string.IsNullOrEmpty(raw))
+            return false;
+        if (raw.Contains("://", StringComparison.OrdinalIgnoreCase))
+            return Uri.TryCreate(raw, UriKind.Absolute, out var abs) &&
+                   (abs.Scheme == Uri.UriSchemeHttp || abs.Scheme == Uri.UriSchemeHttps);
+        return raw.Contains('.', StringComparison.Ordinal) || raw.Contains('/', StringComparison.Ordinal);
     }
 
     private async void CopyPassword(VaultRow row)
@@ -1544,6 +1609,7 @@ public partial class VaultView : UserControl
         private string _username = "";
         private string _sortTitle = "";
         private string _host = "";
+        private string? _url;
         private string _initial = "?";
         private Brush _iconBrush = Brushes.Gray;
         private bool _hasMismatch;
@@ -1580,6 +1646,11 @@ public partial class VaultView : UserControl
         {
             get => _host;
             set { if (_host == value) return; _host = value; Notify(nameof(Host)); }
+        }
+        public string? Url
+        {
+            get => _url;
+            set { if (_url == value) return; _url = value; Notify(nameof(Url)); }
         }
         public string GroupKey { get; set; } = "";
         /// <summary>Lowercased title/username/host/url blob for partial relevance matching.</summary>
@@ -1654,6 +1725,7 @@ public partial class VaultView : UserControl
             Username = other.Username;
             SortTitle = other.SortTitle;
             Host = other.Host;
+            Url = other.Url;
             GroupKey = other.GroupKey;
             MatchBlob = other.MatchBlob;
             MatchTokens = other.MatchTokens;
@@ -1700,6 +1772,7 @@ public partial class VaultView : UserControl
                 Username = username,
                 SortTitle = item.Title,
                 Host = host,
+                Url = item.Url,
                 MatchBlob = blob,
                 MatchTokens = tokens.ToArray(),
                 MismatchProviders = mismatchProviders,

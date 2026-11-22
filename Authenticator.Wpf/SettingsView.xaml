@@ -84,9 +84,10 @@
 			</Border>
 		</StackPanel>
 
-		<ScrollViewer VerticalScrollBarVisibility="Auto" Padding="0,0,2,0">
-			<syncfusion:GroupBar x:Name="SettingsAccordion">
-				<syncfusion:GroupBarItem HeaderText="Shared SQL connection" IsSelected="False">
+		<!-- GroupBar fills remaining space and clips tall sections; scroll inside each item. -->
+		<syncfusion:GroupBar x:Name="SettingsAccordion">
+			<syncfusion:GroupBarItem HeaderText="Shared SQL connection" IsSelected="False">
+				<ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Padding="0,0,2,0">
 					<StackPanel Margin="8">
 						<TextBlock x:Name="ConnectionSummaryText" FontSize="11" Margin="0,0,0,8" Foreground="{DynamicResource SecondaryTextBrush}" Text="Local / Host / Join" />
 						<TextBlock x:Name="ConnectionStatusText" Margin="0,0,0,8" FontWeight="SemiBold" Foreground="{DynamicResource PrimaryTextBrush}" TextWrapping="Wrap" Text="Connection: …" />
@@ -130,9 +131,11 @@
 						</syncfusion:SfDataGrid>
 						<TextBlock x:Name="ConnectionActionStatus" FontSize="12" Foreground="{DynamicResource SecondaryTextBrush}" TextWrapping="Wrap" />
 					</StackPanel>
-				</syncfusion:GroupBarItem>
+				</ScrollViewer>
+			</syncfusion:GroupBarItem>
 
-				<syncfusion:GroupBarItem HeaderText="Unlock methods" IsSelected="True">
+			<syncfusion:GroupBarItem HeaderText="Unlock methods" IsSelected="True">
+				<ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Padding="0,0,2,0">
 					<StackPanel Margin="8">
 						<TextBlock x:Name="UnlockSummaryText" FontSize="11" Margin="0,0,0,8" Foreground="{DynamicResource SecondaryTextBrush}" Text="PIN · YubiKey · Windows Hello" />
 						<TextBlock Margin="0,0,0,12" Foreground="{DynamicResource SecondaryTextBrush}" Text="Auto-lock needs a PIN and/or YubiKey. Without one of these, the lock screen cannot protect codes." TextWrapping="Wrap" />
@@ -177,13 +180,17 @@
 						</StackPanel>
 						<TextBlock x:Name="LockMethodStatus" Margin="0,12,0,0" Foreground="{DynamicResource PrimaryTextBrush}" TextWrapping="Wrap" />
 					</StackPanel>
-				</syncfusion:GroupBarItem>
+				</ScrollViewer>
+			</syncfusion:GroupBarItem>
 
-				<syncfusion:GroupBarItem HeaderText="Appearance">
+			<syncfusion:GroupBarItem HeaderText="Appearance">
+				<ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Padding="0,0,2,0">
 					<StackPanel x:Name="ThemePanel" Margin="8" />
-				</syncfusion:GroupBarItem>
+				</ScrollViewer>
+			</syncfusion:GroupBarItem>
 
-				<syncfusion:GroupBarItem HeaderText="Desktop">
+			<syncfusion:GroupBarItem HeaderText="Desktop">
+				<ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Padding="0,0,2,0">
 					<StackPanel Margin="8">
 						<TextBlock Margin="0,0,0,8" FontWeight="SemiBold" Foreground="{DynamicResource PrimaryTextBrush}" Text="Dock to desktop" />
 						<TextBlock Margin="0,0,0,8" FontSize="12" Foreground="{DynamicResource SecondaryTextBrush}" Text="Collapsed view uses an edge handle. Hover or click to fly the window out from that side." TextWrapping="Wrap" />
@@ -238,13 +245,17 @@
 							<ToggleButton x:Name="GlobalHotkeyToggle" Grid.Column="1" VerticalAlignment="Center" Checked="DesktopToggle_Changed" Style="{StaticResource SwitchToggle}" Unchecked="DesktopToggle_Changed" />
 						</Grid>
 					</StackPanel>
-				</syncfusion:GroupBarItem>
+				</ScrollViewer>
+			</syncfusion:GroupBarItem>
 
-				<syncfusion:GroupBarItem HeaderText="Auto lock">
+			<syncfusion:GroupBarItem HeaderText="Auto lock">
+				<ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Padding="0,0,2,0">
 					<StackPanel x:Name="AutoLockPanel" Margin="8" />
-				</syncfusion:GroupBarItem>
+				</ScrollViewer>
+			</syncfusion:GroupBarItem>
 
-				<syncfusion:GroupBarItem HeaderText="Export and import">
+			<syncfusion:GroupBarItem HeaderText="Export and import">
+				<ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Padding="0,0,2,0">
 					<StackPanel Margin="8">
 						<TextBlock Margin="0,0,0,12" Foreground="{DynamicResource SecondaryTextBrush}" Text="JSON backup is this app's format (v1). Warning: export writes secret keys and backup codes in plaintext — treat the file like a password. Secrets stay encrypted at rest in the database when an unlock method is set. Import adds accounts and folders; it never deletes existing data. Duplicates (same service, username, and secret) are skipped." TextWrapping="Wrap" />
 						<syncfusion:ButtonAdv Margin="0,0,0,8" Label="Export accounts" Click="Export_Click" SizeMode="Normal" />
@@ -257,9 +268,11 @@
 						<syncfusion:ButtonAdv Label="Import migration URI" Click="ImportGoogleUri_Click" SizeMode="Normal" />
 						<TextBlock x:Name="TransferStatus" Margin="0,12,0,0" Foreground="{DynamicResource PrimaryTextBrush}" TextWrapping="Wrap" />
 					</StackPanel>
-				</syncfusion:GroupBarItem>
+				</ScrollViewer>
+			</syncfusion:GroupBarItem>
 
-				<syncfusion:GroupBarItem HeaderText="Developer">
+			<syncfusion:GroupBarItem HeaderText="Developer">
+				<ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Padding="0,0,2,0">
 					<StackPanel Margin="8">
 						<TextBlock Margin="0,0,0,12" Foreground="{DynamicResource SecondaryTextBrush}" TextWrapping="Wrap"
 							Text="Debug tools for Shared vault import/reconcile testing. Purge deletes vault logins, provider links, and the Conflicts list — 2FA accounts, unlock methods, and provider Connect credentials are kept." />
@@ -292,8 +305,8 @@
 								TextWrapping="Wrap" />
 						</StackPanel>
 					</StackPanel>
-				</syncfusion:GroupBarItem>
-			</syncfusion:GroupBar>
-		</ScrollViewer>
+				</ScrollViewer>
+			</syncfusion:GroupBarItem>
+		</syncfusion:GroupBar>
 	</DockPanel>
 </UserControl>
