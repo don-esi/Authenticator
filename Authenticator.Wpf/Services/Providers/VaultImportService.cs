@@ -1259,6 +1259,7 @@ public sealed class VaultImportService
 
         if (!ConnectionConfig.IsOfflineMode)
         {
+            await new VaultMigrationService().EnsureSchemaOnlyAsync(ct);
             await using var db = new AuthenticatorDbContext();
             await Upsert(db);
         }
@@ -1297,6 +1298,7 @@ public sealed class VaultImportService
                 return await Exists(offline);
             }
 
+            await new VaultMigrationService().EnsureSchemaOnlyAsync(ct);
             await using var db = new AuthenticatorDbContext();
             return await Exists(db);
         }

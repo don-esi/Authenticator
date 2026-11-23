@@ -29,12 +29,11 @@ public sealed class VaultMigrationService
         }
 
         await using var db = new AuthenticatorDbContext();
+        // Always run IF NOT EXISTS table ensures — checkpoint only skips EnsureCreated.
         if (!SchemaCheckpoint.IsCurrent())
-        {
             await db.Database.EnsureCreatedAsync(ct);
-            await EnsureVaultTablesAsync(db, ct);
-            SchemaCheckpoint.MarkCurrent();
-        }
+        await EnsureVaultTablesAsync(db, ct);
+        SchemaCheckpoint.MarkCurrent();
 
         string? recovery = null;
         if (VaultKeyServiceUnlocked())

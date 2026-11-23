@@ -11,7 +11,7 @@ namespace Authenticator.Data;
 public static class SchemaCheckpoint
 {
     /// <summary>Bump when DatabaseInitializer / vault table ensures change.</summary>
-    public const int CurrentVersion = 8;
+    public const int CurrentVersion = 9; // 9: SuppressedExternalOrigins (consolidate sync permanence)
 
     private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
     private static readonly string Path = CreatePath();
