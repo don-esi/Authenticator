@@ -4,6 +4,7 @@ using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Threading;
 using Authenticator.Data.Models;
 using Authenticator.Logging;
 using Authenticator.Services;
@@ -37,6 +38,9 @@ public partial class ConsolidateWindow : Window
         SyncfusionBootstrap.ApplyTo(this);
         Closing += Window_Closing;
         PreviewKeyDown += Window_PreviewKeyDown;
+        SuggestedHost.ScrollChanged += (_, _) => ApplyPasswordRevealToVisible();
+        BoardHost.ScrollChanged += (_, _) => ApplyPasswordRevealToVisible();
+        SelectList.AddHandler(ScrollViewer.ScrollChangedEvent, new ScrollChangedEventHandler((_, _) => ApplyPasswordRevealToVisible()));
         Loaded += async (_, _) =>
         {
             try
@@ -83,25 +87,34 @@ public partial class ConsolidateWindow : Window
 
         var gen = ++_loadGeneration;
         StatusText.Text = "Loading…";
-        var items = await _vault.GetItemsAsync(favoritesOnly: false, revealSecrets: true);
-        if (_closing || gen != _loadGeneration || !IsLoaded)
-            return;
+        SetBusy(true, "Loading vault…");
+        try
+        {
+            var items = await _vault.GetItemsAsync(favoritesOnly: false, revealSecrets: true);
+            if (_closing || gen != _loadGeneration || !IsLoaded)
+                return;
 
-        _items = items;
-        RebuildProviderFilters();
-        var prefs = _uiPrefs.Load();
-        SetMode(prefs.ConsolidateMode, persist: false);
-        RebuildSurface();
-        if (_closing || gen != _loadGeneration || !IsLoaded)
-            return;
+            _items = items;
+            RebuildProviderFilters();
+            var prefs = _uiPrefs.Load();
+            SetMode(prefs.ConsolidateMode, persist: false);
+            RebuildSurface();
+            if (_closing || gen != _loadGeneration || !IsLoaded)
+                return;
 
-        var groups = VaultImportService.BuildSuggestedGroups(_items);
-        TitleText.Text = groups.Count > 0
-            ? $"Consolidate duplicates ({groups.Sum(g => g.Items.Count)} in {groups.Count} groups)"
-            : "Consolidate duplicates";
-        StatusText.Text = groups.Count > 0
-            ? $"{groups.Count} suggested group(s). Edit fields · drag onto survivor · Delete."
-            : "No username+host duplicates — try Board or Select.";
+            var groups = VaultImportService.BuildSuggestedGroups(_items);
+            TitleText.Text = groups.Count > 0
+                ? $"Consolidate duplicates ({groups.Sum(g => g.Items.Count)} in {groups.Count} groups)"
+                : "Consolidate duplicates";
+            StatusText.Text = groups.Count > 0
+                ? $"{groups.Count} suggested group(s). Edit fields · drag onto survivor · Delete."
+                : "No username+host duplicates — try Board or Select.";
+        }
+        finally
+        {
+            if (!_closing && IsLoaded && gen == _loadGeneration)
+                SetBusy(false);
+        }
     }
 
     private void RebuildProviderFilters()
@@ -167,7 +180,130 @@ public partial class ConsolidateWindow : Window
     {
         _showPasswords = !_showPasswords;
         RevealAllButton.Content = _showPasswords ? "Hide passwords" : "Reveal passwords";
-        RebuildSurface();
+        // In-place on viewport only — do not rebuild hundreds of cards (freezes the UI).
+        ApplyPasswordRevealToVisible();
+    }
+
+    private void SetBusy(bool busy, string? header = null)
+    {
+        if (!IsLoaded)
+            return;
+        if (header is not null)
+            BusyIndicator.Header = header;
+        BusyOverlay.Visibility = busy ? Visibility.Visible : Visibility.Collapsed;
+        BusyIndicator.IsBusy = busy;
+    }
+
+    /// <summary>
+    /// Toggle password display for cards currently in the scroll viewport.
+    /// Off-screen cards stay masked until scrolled into view.
+    /// </summary>
+    private void ApplyPasswordRevealToVisible()
+    {
+        if (_closing || !IsLoaded)
+            return;
+
+        if (_mode == VaultConsolidateMode.Select)
+        {
+            ApplySelectPasswordReveal();
+            return;
+        }
+
+        var scroll = _mode == VaultConsolidateMode.Board ? BoardHost : SuggestedHost;
+        var root = _mode == VaultConsolidateMode.Board
+            ? (DependencyObject)BoardPanel
+            : SuggestedPanel;
+        foreach (var box in FindPasswordBoxes(root))
+        {
+            if (!IsInViewport(box, scroll))
+                continue;
+            ApplyPasswordBoxDisplay(box);
+        }
+    }
+
+    private void ApplySelectPasswordReveal()
+    {
+        var scroll = FindScrollViewer(SelectList);
+        for (var i = 0; i < _selectRows.Count; i++)
+        {
+            var row = _selectRows[i];
+            var plain = row.PasswordPlain;
+            var masked = string.IsNullOrEmpty(plain) ? ""
+                : new string('•', Math.Min(12, Math.Max(4, plain.Length)));
+
+            // Keep off-screen rows masked; only realized+visible rows show plain when revealing.
+            var container = SelectList.ItemContainerGenerator.ContainerFromIndex(i) as ListViewItem;
+            var visible = container is not null &&
+                          (scroll is null || IsInViewport(container, scroll));
+            row.PasswordDisplay = _showPasswords && visible ? plain : masked;
+        }
+
+        SelectList.Items.Refresh();
+    }
+
+    private void ApplyPasswordBoxDisplay(TextBox box)
+    {
+        if (box.Tag is not PasswordFieldState state)
+            return;
+        // Leave the focused editor alone — GotFocus already shows plain text.
+        if (box.IsKeyboardFocusWithin)
+            return;
+
+        var plain = state.Plain ?? "";
+        var next = !_showPasswords && plain.Length > 0
+            ? new string('•', Math.Min(12, Math.Max(4, plain.Length)))
+            : plain;
+        if (!string.Equals(box.Text, next, StringComparison.Ordinal))
+            box.Text = next;
+    }
+
+    private static IEnumerable<TextBox> FindPasswordBoxes(DependencyObject root)
+    {
+        var count = VisualTreeHelper.GetChildrenCount(root);
+        for (var i = 0; i < count; i++)
+        {
+            var child = VisualTreeHelper.GetChild(root, i);
+            if (child is TextBox box && box.Tag is PasswordFieldState)
+                yield return box;
+            foreach (var nested in FindPasswordBoxes(child))
+                yield return nested;
+        }
+    }
+
+    private static bool IsInViewport(FrameworkElement element, FrameworkElement viewportHost)
+    {
+        if (!element.IsVisible || element.ActualWidth <= 0 || element.ActualHeight <= 0)
+            return false;
+        try
+        {
+            var transform = element.TransformToAncestor(viewportHost);
+            var bounds = transform.TransformBounds(new Rect(0, 0, element.ActualWidth, element.ActualHeight));
+            var view = new Rect(0, 0, viewportHost.ActualWidth, viewportHost.ActualHeight);
+            return view.IntersectsWith(bounds);
+        }
+        catch (InvalidOperationException)
+        {
+            return false;
+        }
+    }
+
+    private static ScrollViewer? FindScrollViewer(DependencyObject root)
+    {
+        if (root is ScrollViewer sv)
+            return sv;
+        var count = VisualTreeHelper.GetChildrenCount(root);
+        for (var i = 0; i < count; i++)
+        {
+            var found = FindScrollViewer(VisualTreeHelper.GetChild(root, i));
+            if (found is not null)
+                return found;
+        }
+        return null;
+    }
+
+    private sealed class PasswordFieldState
+    {
+        public string Plain { get; set; } = "";
     }
 
     private void SetMode(VaultConsolidateMode mode, bool persist)
@@ -241,6 +377,10 @@ public partial class ConsolidateWindow : Window
             case VaultConsolidateMode.Board: BuildBoard(filtered); break;
             default: BuildSelect(filtered); break;
         }
+
+        // Cards are built masked; reveal only what is currently on screen.
+        if (_showPasswords)
+            ApplyPasswordRevealToVisible();
     }
 
     private static bool MatchesSearch(VaultItem item, string q)
@@ -362,9 +502,10 @@ public partial class ConsolidateWindow : Window
                 suggestById[i.Id] = s.Id;
         }
 
+        // Build masked; ApplyPasswordRevealToVisible (via RebuildSurface) unmasks on-screen rows.
         _selectRows = filtered.Select(i =>
         {
-            var row = SelectRow.From(i, _showPasswords);
+            var row = SelectRow.From(i, showPasswords: false);
             row.IsSuggestedSurvivor = suggestById.TryGetValue(i.Id, out var sid) && sid == i.Id;
             row.Suggestion = row.IsSuggestedSurvivor
                 ? "Automerge"
@@ -486,13 +627,15 @@ public partial class ConsolidateWindow : Window
                 Margin = new Thickness(0, body.Children.Count == 0 ? 0 : 6, 0, 2)
             });
             var plain = value ?? "";
+            // Password fields start masked; Reveal only unmasks cards in the viewport.
+            var passwordState = password ? new PasswordFieldState { Plain = plain } : null;
             var box = new TextBox
             {
-                Text = password && !_showPasswords && plain.Length > 0
+                Text = password && plain.Length > 0
                     ? new string('•', Math.Min(12, Math.Max(4, plain.Length)))
                     : plain,
                 Style = (Style)FindResource("DialogInput"),
-                Tag = plain,
+                Tag = passwordState as object ?? plain,
                 Padding = new Thickness(6, 4, 6, 4),
                 FontFamily = password ? new FontFamily("Consolas") : FontFamily
             };
@@ -500,10 +643,13 @@ public partial class ConsolidateWindow : Window
             void Commit()
             {
                 var text = box.Text;
-                if (password && !_showPasswords && text.All(c => c == '•'))
-                    text = box.Tag as string ?? "";
-                else if (password)
-                    box.Tag = text;
+                if (password && passwordState is not null)
+                {
+                    if (!_showPasswords && text.All(c => c == '•'))
+                        text = passwordState.Plain;
+                    else
+                        passwordState.Plain = text;
+                }
                 assign(text);
             }
 
@@ -512,9 +658,9 @@ public partial class ConsolidateWindow : Window
                 if (_closing)
                     return;
                 Commit();
-                if (password && !_showPasswords)
+                if (password && passwordState is not null && !_showPasswords)
                 {
-                    var p = box.Tag as string ?? "";
+                    var p = passwordState.Plain;
                     box.Text = p.Length == 0 ? "" : new string('•', Math.Min(12, Math.Max(4, p.Length)));
                 }
                 await SaveItemFieldsAsync(item);
@@ -523,8 +669,8 @@ public partial class ConsolidateWindow : Window
             {
                 if (_closing)
                     return;
-                if (password && !_showPasswords)
-                    box.Text = box.Tag as string ?? "";
+                if (password && passwordState is not null && !_showPasswords)
+                    box.Text = passwordState.Plain;
             };
             box.KeyDown += async (_, e) =>
             {
@@ -849,11 +995,21 @@ public partial class ConsolidateWindow : Window
             "Merge into vault", primaryText: "Update all", secondaryText: "Vault only", cancelText: "Cancel");
         if (choice == AppDialogChoice.Cancel) return;
 
+        var updateLinked = choice == AppDialogChoice.Primary;
+        SetBusy(true, updateLinked ? "Connecting providers…" : "Merging…");
+        StatusText.Text = updateLinked ? "Connecting providers and updating linked vaults…" : "Merging…";
         try
         {
-            StatusText.Text = "Merging…";
+            // Paint spinner before the first EnsureConnected / SQL work.
+            BusyOverlay.UpdateLayout();
+            await Dispatcher.InvokeAsync(() => { }, DispatcherPriority.ApplicationIdle);
+            await Task.Delay(50);
+            if (_closing) return;
+
             var result = await _import.MergeVaultItemsAsync(survivorId, donorIds, selection,
-                updateLinkedSources: choice == AppDialogChoice.Primary);
+                updateLinkedSources: updateLinked);
+            if (_closing) return;
+
             _changedAny = true;
             var msg =
                 $"Merged into survivor. Links transferred: {result.LinksTransferred}. Same-provider dropped: {result.LinksDroppedSameProvider}." +
@@ -864,6 +1020,7 @@ public partial class ConsolidateWindow : Window
                 msg += $"\nProviders: {push.Updated} updated, {push.Skipped} skipped, {push.Failed} failed.";
             var warn = result.Push is { Failed: > 0 } ||
                        result.Messages.Any(m => m.Contains("failed", StringComparison.OrdinalIgnoreCase));
+            SetBusy(false);
             AppDialog.Alert(this, msg, "Consolidate",
                 warn ? AppDialogKind.Warning : AppDialogKind.Info);
             await ReloadAsync();
@@ -872,6 +1029,11 @@ public partial class ConsolidateWindow : Window
         {
             AppDialog.Alert(this, ex.Message, "Consolidate", AppDialogKind.Warning);
             StatusText.Text = "Merge failed.";
+        }
+        finally
+        {
+            if (!_closing && IsLoaded)
+                SetBusy(false);
         }
     }
 
@@ -918,7 +1080,7 @@ public partial class ConsolidateWindow : Window
         public string Title { get; init; } = "";
         public string Username { get; init; } = "";
         public string PasswordPlain { get; init; } = "";
-        public string PasswordDisplay { get; init; } = "";
+        public string PasswordDisplay { get; set; } = "";
         public string Host { get; init; } = "";
         public string Providers { get; init; } = "";
         public string CreatedDisplay { get; init; } = "";

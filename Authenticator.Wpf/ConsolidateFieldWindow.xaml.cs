@@ -390,8 +390,17 @@ public partial class ConsolidateFieldWindow : Window
     {
         _showPasswords = !_showPasswords;
         RevealButton.Content = _showPasswords ? "Hide passwords" : "Reveal passwords";
-        BuildMatrix();
-        Highlight();
+        // In-place text update — do not rebuild the whole matrix.
+        foreach (var ((field, itemId), cell) in _cells)
+        {
+            if (field is not ("Password" or "TOTP"))
+                continue;
+            if (cell.Child is not TextBlock block)
+                continue;
+            var item = _columns.First(i => i.Id == itemId);
+            block.Text = FormatField(field, item);
+        }
+
         LoadEditBox();
     }
 

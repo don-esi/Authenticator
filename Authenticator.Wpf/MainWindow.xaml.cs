@@ -106,8 +106,8 @@ public partial class MainWindow : Window
         };
         _dockAutoHide = new DockAutoHideService(
             this,
-            shouldWatch: () => IsDocked && !_isCollapsed && !_forceClose && !_dockPinned && IsVisible,
-            canCollapse: () => !_dockAnimating && !_dockPinned && _suppressDockAutoHide == 0 && IsDocked && !_isCollapsed,
+            shouldWatch: () => IsDocked && !_isCollapsed && !_forceClose && !_dockPinned && !_locked && IsVisible,
+            canCollapse: () => !_dockAnimating && !_dockPinned && !_locked && _suppressDockAutoHide == 0 && IsDocked && !_isCollapsed,
             collapseAsync: () => CollapseToDockAsync());
         SourceInitialized += (_, _) =>
         {
@@ -239,7 +239,13 @@ public partial class MainWindow : Window
             UpdateCollapseButton();
             ApplyTopmost();
 
-            if (IsDocked && _isCollapsed)
+            // Stay expanded while unlock is pending — collapsed edge handle can't host PIN/Hello.
+            if (IsDocked && _isCollapsed && _locked)
+            {
+                _isCollapsed = false;
+                SnapExpandedToDockEdge();
+            }
+            else if (IsDocked && _isCollapsed)
                 await CollapseToDockAsync(persist: false, animate: false);
             else if (IsDocked)
                 SnapExpandedToDockEdge();
@@ -427,10 +433,10 @@ public partial class MainWindow : Window
 
     private void RequestDockAutoHide(string reason)
     {
-        if (!IsDocked || _isCollapsed || _dockAnimating || _forceClose || _dockPinned || _suppressDockAutoHide > 0 || !IsVisible)
+        if (!IsDocked || _isCollapsed || _dockAnimating || _forceClose || _dockPinned || _locked || _suppressDockAutoHide > 0 || !IsVisible)
         {
             LoggingConfiguration.LogInfo(
-                $"Dock auto-hide skipped ({reason}): docked={IsDocked} collapsed={_isCollapsed} animating={_dockAnimating} forceClose={_forceClose} pinned={_dockPinned} suppress={_suppressDockAutoHide} visible={IsVisible} pos={_dockPosition}",
+                $"Dock auto-hide skipped ({reason}): docked={IsDocked} collapsed={_isCollapsed} animating={_dockAnimating} forceClose={_forceClose} pinned={_dockPinned} locked={_locked} suppress={_suppressDockAutoHide} visible={IsVisible} pos={_dockPosition}",
                 nameof(MainWindow));
             return;
         }
@@ -460,7 +466,7 @@ public partial class MainWindow : Window
 
     private void CollapseDock_Click(object sender, RoutedEventArgs e)
     {
-        if (IsDocked && !_dockPinned)
+        if (IsDocked && !_dockPinned && !_locked)
             _ = CollapseToDockAsync();
     }
 
@@ -623,8 +629,14 @@ public partial class MainWindow : Window
 
     private async Task CollapseToDockAsync(bool persist = true, bool animate = true)
     {
+        // Unlock UI lives on the expanded window — never tuck away while PIN/Hello is pending.
         if (!IsDocked || _dockAnimating)
             return;
+        if (_locked)
+        {
+            LoggingConfiguration.LogInfo("Collapse skipped: unlock pending.", nameof(MainWindow));
+            return;
+        }
 
         _dockAnimating = true;
         try
@@ -839,6 +851,7 @@ public partial class MainWindow : Window
         _pinPanelForcedForYubiEcho = false;
         UnlockErrorText.Text = string.Empty;
         ConfigureLockOverlay();
+        UpdateDockAutoHideWatch();
         Activate();
         FocusLockInput();
         LoggingConfiguration.LogInfo("Auto-lock engaged.", nameof(MainWindow));
@@ -1156,6 +1169,7 @@ public partial class MainWindow : Window
         UnlockErrorText.Text = string.Empty;
         LockOverlay.Visibility = Visibility.Collapsed;
         PageHost.Visibility = Visibility.Visible;
+        UpdateDockAutoHideWatch();
         // Pipe must be up before Codes reload — extension ping hits this immediately.
         VaultNativePipeServer.Instance.Start();
         // Defer page show/reload so lock focus teardown cannot race CodesView ReloadAsync.
