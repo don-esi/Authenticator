@@ -46,6 +46,26 @@ internal abstract class MemoryVaultProvider : IVaultProvider
         return Task.CompletedTask;
     }
 
+    public virtual Task DeleteEntryAsync(string externalId, CancellationToken ct = default)
+    {
+        if (!IsConnected)
+            throw new InvalidOperationException($"{DisplayName} is not connected.");
+        if (!Capabilities.SupportsDelete)
+            throw new NotSupportedException($"{DisplayName} does not support deleting entries.");
+        RemoveMemoryEntry(externalId);
+        return Task.CompletedTask;
+    }
+
+    public virtual Task<string> CreateEntryAsync(ProviderEntry entry, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(entry);
+        if (!IsConnected)
+            throw new InvalidOperationException($"{DisplayName} is not connected.");
+        if (!Capabilities.SupportsCreate)
+            throw new NotSupportedException($"{DisplayName} does not support creating entries.");
+        throw new NotSupportedException($"{DisplayName} create is not implemented.");
+    }
+
     protected void UpdateMemoryEntry(ProviderEntry entry)
     {
         var originId = entry.ExternalId.Trim();
@@ -66,13 +86,32 @@ internal abstract class MemoryVaultProvider : IVaultProvider
             Url = entry.Url,
             Notes = entry.Notes,
             Totp = entry.Totp ?? previous.Totp,
-            Path = string.IsNullOrWhiteSpace(entry.Path) ? previous.Path : entry.Path,
+            Path = entry.Path is not null ? entry.Path : previous.Path,
             IsFavorite = entry.IsFavorite,
             ItemType = entry.ItemType == default ? previous.ItemType : entry.ItemType,
             Fields = entry.Fields.Count > 0 ? entry.Fields : previous.Fields,
             CreatedAt = entry.CreatedAt ?? previous.CreatedAt,
             ModifiedAt = entry.ModifiedAt ?? DateTime.UtcNow
         };
+    }
+
+    protected void RemoveMemoryEntry(string externalId)
+    {
+        var originId = (externalId ?? "").Trim();
+        _entries.RemoveAll(e =>
+            string.Equals(e.ExternalId, originId, StringComparison.OrdinalIgnoreCase));
+    }
+
+    protected void AddMemoryEntry(ProviderEntry entry)
+    {
+        ArgumentNullException.ThrowIfNull(entry);
+        var originId = entry.ExternalId.Trim();
+        var index = _entries.FindIndex(e =>
+            string.Equals(e.ExternalId, originId, StringComparison.OrdinalIgnoreCase));
+        if (index >= 0)
+            _entries[index] = entry;
+        else
+            _entries.Add(entry);
     }
 
     protected void SetEntries(IEnumerable<ProviderEntry> entries)
@@ -122,7 +161,9 @@ internal sealed class KeePassVaultProvider : MemoryVaultProvider
         RequiresFilePath = true,
         SupportsSecureNotes = true,
         SupportsFavorites = true,
-        SupportsWriteBack = true
+        SupportsWriteBack = true,
+        SupportsDelete = true,
+        SupportsCreate = true
     };
 
     public override Task ConnectAsync(ProviderConnectRequest request, CancellationToken ct = default)
@@ -181,26 +222,131 @@ internal sealed class KeePassVaultProvider : MemoryVaultProvider
             SetField(pe, PwDefs.UrlField, entry.Url ?? "", protect: false);
             SetField(pe, PwDefs.NotesField, entry.Notes ?? "", protect: false);
             SetField(pe, "Favorite", entry.IsFavorite ? "1" : "0", protect: false);
+            if (entry.Path is not null)
+                MoveEntryToPath(pe, entry.Path);
             pe.Touch(true, false);
 
-            try
-            {
-                _db.Save(null);
-            }
-            catch (Exception ex)
-            {
-                throw new InvalidOperationException(
-                    "Could not save KeePass database. Close the file in KeePass if it is open, then try again.",
-                    ex);
-            }
-
+            SaveDatabase();
+            entry.Path = BuildPath(pe);
             LoggingConfiguration.LogInfo(
-                $"KeePass wrote origin id {entry.ExternalId.Trim()} to disk.",
+                $"KeePass wrote origin id {entry.ExternalId.Trim()} to disk (path='{entry.Path}').",
                 nameof(KeePassVaultProvider));
         }
 
         UpdateMemoryEntry(entry);
         return Task.CompletedTask;
+    }
+
+    public override Task DeleteEntryAsync(string externalId, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(externalId))
+            throw new ArgumentException("Origin store id is required.", nameof(externalId));
+
+        lock (_gate)
+        {
+            if (_db is null || !IsConnected)
+                throw new InvalidOperationException("KeePass is not connected.");
+
+            var uuid = ParseUuid(externalId);
+            var pe = _db.RootGroup.FindEntry(uuid, true)
+                     ?? throw new InvalidOperationException(
+                         $"No KeePass entry with origin id '{externalId.Trim()}'.");
+            var parent = pe.ParentGroup
+                         ?? throw new InvalidOperationException("KeePass entry has no parent group.");
+            if (!parent.Entries.Remove(pe))
+                throw new InvalidOperationException($"Could not remove KeePass entry '{externalId.Trim()}'.");
+            SaveDatabase();
+            LoggingConfiguration.LogInfo(
+                $"KeePass deleted origin id {externalId.Trim()}.",
+                nameof(KeePassVaultProvider));
+        }
+
+        RemoveMemoryEntry(externalId);
+        return Task.CompletedTask;
+    }
+
+    public override Task<string> CreateEntryAsync(ProviderEntry entry, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(entry);
+        string id;
+        lock (_gate)
+        {
+            if (_db is null || !IsConnected)
+                throw new InvalidOperationException("KeePass is not connected.");
+
+            var group = ResolveOrCreateGroup(entry.Path);
+            var pe = new PwEntry(true, true);
+            SetField(pe, PwDefs.TitleField, entry.Title ?? "", protect: false);
+            SetField(pe, PwDefs.UserNameField, entry.Username ?? "", protect: false);
+            SetField(pe, PwDefs.PasswordField, entry.Password ?? "", protect: true);
+            SetField(pe, PwDefs.UrlField, entry.Url ?? "", protect: false);
+            SetField(pe, PwDefs.NotesField, entry.Notes ?? "", protect: false);
+            SetField(pe, "Favorite", entry.IsFavorite ? "1" : "0", protect: false);
+            group.AddEntry(pe, true);
+            SaveDatabase();
+            id = pe.Uuid.ToHexString().ToLowerInvariant();
+            entry.ExternalId = id;
+            entry.Path = BuildPath(pe);
+            LoggingConfiguration.LogInfo(
+                $"KeePass created origin id {id} under '{entry.Path}'.",
+                nameof(KeePassVaultProvider));
+        }
+
+        AddMemoryEntry(entry);
+        return Task.FromResult(id);
+    }
+
+    private void MoveEntryToPath(PwEntry entry, string? path)
+    {
+        var target = ResolveOrCreateGroup(path);
+        if (ReferenceEquals(entry.ParentGroup, target))
+            return;
+        entry.ParentGroup?.Entries.Remove(entry);
+        target.AddEntry(entry, true);
+    }
+
+    private PwGroup ResolveOrCreateGroup(string? path)
+    {
+        if (_db is null)
+            throw new InvalidOperationException("KeePass is not connected.");
+
+        var normalized = NormalizeKeePassPath(path);
+        if (string.IsNullOrEmpty(normalized))
+            return _db.RootGroup;
+
+        // FindCreateSubTree creates missing groups; separators match Path we emit with '/'.
+        return _db.RootGroup.FindCreateSubTree(normalized, new[] { '/', '\\' }, true)
+               ?? _db.RootGroup;
+    }
+
+    private static string NormalizeKeePassPath(string? path)
+    {
+        var raw = (path ?? "").Trim().Replace('\\', '/');
+        if (string.IsNullOrEmpty(raw) ||
+            string.Equals(raw, "(none)", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(raw, "/", StringComparison.Ordinal))
+            return "";
+
+        var parts = raw.Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(p => !string.Equals(p, "Root", StringComparison.OrdinalIgnoreCase))
+            .ToArray();
+        return string.Join("/", parts);
+    }
+
+    private void SaveDatabase()
+    {
+        if (_db is null)
+            return;
+        try
+        {
+            _db.Save(null);
+        }
+        catch (Exception ex)
+        {
+            throw new InvalidOperationException(
+                "Could not save KeePass database. Close the file in KeePass if it is open, then try again.",
+                ex);
+        }
     }
 
     private void CloseDatabase()
@@ -313,7 +459,9 @@ internal sealed class LastPassVaultProvider : MemoryVaultProvider
         SupportsFavorites = true,
         SupportsSecureNotes = true,
         // Live session write-back via show_website.php (session retained until Disconnect).
-        SupportsWriteBack = true
+        SupportsWriteBack = true,
+        SupportsDelete = true,
+        SupportsCreate = true
     };
 
     public override async Task ConnectAsync(ProviderConnectRequest request, CancellationToken ct = default)
@@ -404,12 +552,72 @@ internal sealed class LastPassVaultProvider : MemoryVaultProvider
             entry.Url ?? "",
             entry.Notes ?? "",
             entry.IsFavorite,
-            ct);
+            pathOrGrouping: entry.Path,
+            cancellationToken: ct);
+
+        // Refresh Path from live account after grouping change.
+        var live = vault.Accounts.FirstOrDefault(a =>
+            string.Equals(a.Id, entry.ExternalId.Trim(), StringComparison.Ordinal));
+        if (live is not null)
+            entry.Path = live.Path;
 
         UpdateMemoryEntry(entry);
         LoggingConfiguration.LogInfo(
-            $"LastPass remote update OK for origin id '{entry.ExternalId}'.",
+            $"LastPass remote update OK for origin id '{entry.ExternalId}' (path='{entry.Path}').",
             nameof(LastPassVaultProvider));
+    }
+
+    public override async Task DeleteEntryAsync(string externalId, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(externalId))
+            throw new ArgumentException("Origin store id is required.", nameof(externalId));
+
+        PasswordManager.LastPass.Vault vault;
+        lock (_gate)
+        {
+            if (_vault is null || !IsConnected)
+                throw new InvalidOperationException("LastPass is not connected.");
+            vault = _vault;
+        }
+
+        await vault.DeleteAccountAsync(externalId.Trim(), ct);
+        RemoveMemoryEntry(externalId);
+        LoggingConfiguration.LogInfo(
+            $"LastPass remote delete OK for origin id '{externalId}'.",
+            nameof(LastPassVaultProvider));
+    }
+
+    public override async Task<string> CreateEntryAsync(ProviderEntry entry, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(entry);
+
+        PasswordManager.LastPass.Vault vault;
+        lock (_gate)
+        {
+            if (_vault is null || !IsConnected)
+                throw new InvalidOperationException("LastPass is not connected.");
+            vault = _vault;
+        }
+
+        var id = await vault.CreateAccountAsync(
+            entry.Title ?? "",
+            entry.Username ?? "",
+            entry.Password ?? "",
+            entry.Url ?? "",
+            entry.Notes ?? "",
+            entry.IsFavorite,
+            pathOrGrouping: entry.Path,
+            cancellationToken: ct);
+
+        entry.ExternalId = id;
+        var live = vault.Accounts.FirstOrDefault(a => string.Equals(a.Id, id, StringComparison.Ordinal));
+        if (live is not null)
+            entry.Path = live.Path;
+        AddMemoryEntry(entry);
+        LoggingConfiguration.LogInfo(
+            $"LastPass remote create OK origin id '{id}' (path='{entry.Path}').",
+            nameof(LastPassVaultProvider));
+        return id;
     }
 
     private void CloseVault()

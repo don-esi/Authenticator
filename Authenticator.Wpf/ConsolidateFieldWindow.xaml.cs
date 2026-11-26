@@ -11,7 +11,7 @@ namespace Authenticator;
 public partial class ConsolidateFieldWindow : Window
 {
     private static readonly string[] FieldKeys =
-        ["Title", "Username", "Password", "URL", "Notes", "Favorite", "TOTP"];
+        ["Title", "Username", "Password", "URL", "Notes", "Favorite", "TOTP", "Folder"];
 
     private static readonly HashSet<string> MultiMergeFields = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -473,6 +473,8 @@ public partial class ConsolidateFieldWindow : Window
         "Notes" => item.Notes,
         "Favorite" => item.IsFavorite.ToString(),
         "TOTP" => item.TotpSecret,
+        "Folder" => VaultConsolidateHints.FolderDisplayName(item)
+                    ?? VaultConsolidateHints.RichestProviderPath(item),
         _ => null
     };
 

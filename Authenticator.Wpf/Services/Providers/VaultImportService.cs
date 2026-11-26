@@ -92,6 +92,9 @@ public sealed class VaultMergeResult
     public int DonorsDeleted { get; set; }
     public int LinksTransferred { get; set; }
     public int LinksDroppedSameProvider { get; set; }
+    public int OriginsDeleted { get; set; }
+    public int OriginsCreated { get; set; }
+    public string? CanonicalPath { get; set; }
     public VaultPushResult? Push { get; set; }
     public List<string> Messages { get; } = new();
 }
@@ -171,7 +174,7 @@ public static class VaultConsolidateHints
         all.AddRange(donors);
         var selection = new MergeFieldSelection();
 
-        foreach (var field in new[] { "Title", "Username", "Password", "URL", "Notes", "Favorite", "TOTP" })
+        foreach (var field in new[] { "Title", "Username", "Password", "URL", "Notes", "Favorite", "TOTP", "Folder" })
         {
             if (field is "Notes")
             {
@@ -188,6 +191,35 @@ public static class VaultConsolidateHints
                 }
             }
 
+            if (field is "Folder")
+            {
+                // Prefer Shared folder name; else richest provider Path among linked origins.
+                var bestShared = all
+                    .Select(i => (Item: i, Value: FolderDisplayName(i), Ts: EffectiveTimestampUtc(i) ?? DateTime.MinValue))
+                    .Where(t => !string.IsNullOrWhiteSpace(t.Value))
+                    .OrderByDescending(t => t.Value!.Length)
+                    .ThenByDescending(t => t.Ts)
+                    .ThenByDescending(t => t.Item.Id == survivor.Id)
+                    .FirstOrDefault();
+                if (bestShared.Item is not null)
+                {
+                    selection.Set("Folder", bestShared.Item.Id);
+                    continue;
+                }
+
+                var bestPath = all
+                    .Select(i => (Item: i, Value: RichestProviderPath(i), Ts: EffectiveTimestampUtc(i) ?? DateTime.MinValue))
+                    .Where(t => !string.IsNullOrWhiteSpace(t.Value))
+                    .OrderByDescending(t => t.Value!.Length)
+                    .ThenByDescending(t => t.Ts)
+                    .FirstOrDefault();
+                if (bestPath.Item is not null && !string.IsNullOrWhiteSpace(bestPath.Value))
+                    selection.SetOverride("Folder", bestPath.Value!);
+                else
+                    selection.Set("Folder", survivor.Id);
+                continue;
+            }
+
             var best = all
                 .Select(i => (Item: i, Value: FieldRaw(field, i), Ts: EffectiveTimestampUtc(i) ?? DateTime.MinValue))
                 .Where(t => !string.IsNullOrWhiteSpace(t.Value))
@@ -201,6 +233,46 @@ public static class VaultConsolidateHints
         return selection;
     }
 
+    public static string? FolderDisplayName(VaultItem item)
+    {
+        var name = item.Folder?.Name?.Trim();
+        if (!string.IsNullOrEmpty(name))
+            return name;
+        return null;
+    }
+
+    /// <summary>Longest non-empty provider Path from cached remote entries for this item's links.</summary>
+    public static string? RichestProviderPath(VaultItem item)
+    {
+        string? best = null;
+        foreach (var link in item.ExternalLinks ?? Array.Empty<ExternalLink>())
+        {
+            if (string.IsNullOrWhiteSpace(link.Provider) ||
+                string.Equals(link.Provider, "Shared", StringComparison.OrdinalIgnoreCase))
+                continue;
+            if (string.IsNullOrWhiteSpace(link.ExternalId))
+                continue;
+            if (!ProviderSessionService.Instance.TryGetCachedRemote(link.Provider, link.ExternalId, out var remote) ||
+                remote is null)
+                continue;
+            var path = NormalizeCanonicalPath(remote.Path);
+            if (string.IsNullOrEmpty(path))
+                continue;
+            if (best is null || path.Length > best.Length)
+                best = path;
+        }
+
+        return best;
+    }
+
+    public static string? NormalizeCanonicalPath(string? path)
+    {
+        var p = (path ?? "").Trim();
+        if (string.IsNullOrEmpty(p) || string.Equals(p, "(none)", StringComparison.OrdinalIgnoreCase))
+            return null;
+        return p.Replace('\\', '/');
+    }
+
     private static string? FieldRaw(string field, VaultItem item) => field switch
     {
         "Title" => item.Title,
@@ -210,6 +282,7 @@ public static class VaultConsolidateHints
         "Notes" => item.Notes,
         "Favorite" => item.IsFavorite.ToString(),
         "TOTP" => item.TotpSecret,
+        "Folder" => FolderDisplayName(item) ?? RichestProviderPath(item),
         _ => null
     };
 }
@@ -622,8 +695,9 @@ public sealed class VaultImportService
     }
 
     /// <summary>
-    /// Merge donor vault rows into <paramref name="survivorId"/>: apply field selection, transfer
-    /// ExternalLinks (drop when survivor already has that provider), soft-delete donors.
+    /// Merge donor vault rows into <paramref name="survivorId"/>: apply field selection (incl. Folder),
+    /// transfer ExternalLinks, soft-delete donors. With updateLinkedSources: push survivor (with Path),
+    /// delete dropped same-provider origins remotely, create on missing providers from the merge set.
     /// </summary>
     public async Task<VaultMergeResult> MergeVaultItemsAsync(
         Guid survivorId,
@@ -673,6 +747,7 @@ public sealed class VaultImportService
         fieldsBefore.MergedDonors = donorItems.Select(ReconcileHistoryService.CaptureSnapshot).ToList();
 
         ApplyMergeFields(survivor, byId, selection);
+        var canonicalPath = await ApplyMergeFolderAsync(survivor, byId, selection, ct);
         await _items.SaveAsync(survivor, ct, touchModifiedAt: true);
 
         var history = new ReconcileHistoryService();
@@ -680,7 +755,8 @@ public sealed class VaultImportService
         var result = new VaultMergeResult
         {
             SurvivorId = survivorId,
-            DonorsDeleted = donorItems.Count
+            DonorsDeleted = donorItems.Count,
+            CanonicalPath = canonicalPath
         };
 
         var survivorProviders = new HashSet<string>(
@@ -688,6 +764,10 @@ public sealed class VaultImportService
                 .Where(l => !string.IsNullOrWhiteSpace(l.Provider))
                 .Select(l => l.Provider),
             StringComparer.OrdinalIgnoreCase);
+
+        // Providers that appeared anywhere in the merge set (for create-if-missing).
+        var mergeProviders = new HashSet<string>(survivorProviders, StringComparer.OrdinalIgnoreCase);
+        var droppedOrigins = new List<(string Provider, string ExternalId, string DonorTitle)>();
 
         foreach (var donor in donorItems)
         {
@@ -701,14 +781,15 @@ public sealed class VaultImportService
                     continue;
                 }
 
+                mergeProviders.Add(link.Provider);
+
                 if (survivorProviders.Contains(link.Provider))
                 {
-                    // Same provider already on survivor — dropping this origin must not come back on Sync.
-                    await SuppressOriginAsync(link.Provider, link.ExternalId, survivorId, ct);
+                    var originId = link.ExternalId?.Trim() ?? "";
+                    if (!string.IsNullOrEmpty(originId))
+                        droppedOrigins.Add((link.Provider, originId, donor.Title ?? ""));
                     await RemoveLinkAsync(donor.Id, link.Provider, ct);
                     result.LinksDroppedSameProvider++;
-                    result.Messages.Add(
-                        $"Kept survivor's {link.Provider} link; suppressed donor '{donor.Title}' origin from re-import.");
                     continue;
                 }
 
@@ -736,12 +817,89 @@ public sealed class VaultImportService
         if (updateLinkedSources)
         {
             var reloaded = await _items.GetByIdAsync(survivorId, ct) ?? survivor;
-            result.Push = await PushToLinkedProvidersAsync(reloaded, ct);
+            result.Push = await PushToLinkedProvidersAsync(reloaded, canonicalPath, ct);
+
+            foreach (var dropped in droppedOrigins)
+            {
+                try
+                {
+                    var provider = await ProviderSessionService.Instance.EnsureConnectedAsync(dropped.Provider, ct);
+                    if (!provider.Capabilities.SupportsDelete)
+                    {
+                        await SuppressOriginAsync(dropped.Provider, dropped.ExternalId, survivorId, ct);
+                        result.Messages.Add(
+                            $"{dropped.Provider}: delete not supported — suppressed origin from re-import.");
+                        continue;
+                    }
+
+                    await provider.DeleteEntryAsync(dropped.ExternalId, ct);
+                    result.OriginsDeleted++;
+                    result.Messages.Add(
+                        $"Deleted {dropped.Provider} duplicate from '{dropped.DonorTitle}' ({dropped.ExternalId}).");
+                }
+                catch (Exception ex)
+                {
+                    LoggingConfiguration.LogException(ex,
+                        $"Delete dropped origin {dropped.Provider}:{dropped.ExternalId} failed.",
+                        nameof(VaultImportService));
+                    await SuppressOriginAsync(dropped.Provider, dropped.ExternalId, survivorId, ct);
+                    result.Messages.Add(
+                        $"{dropped.Provider}: delete failed ({ex.Message}) — suppressed so Sync won't resurrect.");
+                }
+            }
+
+            // Create on connected write-back providers from the merge set that still lack a survivor link.
+            var linksAfter = await GetLinksForItemAsync(survivorId, ct);
+            var linkedProviders = new HashSet<string>(
+                linksAfter.Where(l => !string.IsNullOrWhiteSpace(l.Provider)).Select(l => l.Provider),
+                StringComparer.OrdinalIgnoreCase);
+
+            foreach (var providerId in mergeProviders)
+            {
+                if (linkedProviders.Contains(providerId))
+                    continue;
+                try
+                {
+                    var provider = await ProviderSessionService.Instance.EnsureConnectedAsync(providerId, ct);
+                    if (!provider.Capabilities.SupportsCreate || !provider.Capabilities.SupportsWriteBack)
+                    {
+                        result.Messages.Add($"{providerId}: create skipped (not supported or not write-capable).");
+                        continue;
+                    }
+
+                    var created = ToProviderEntry(reloaded, externalId: "", canonicalPath);
+                    var newId = await provider.CreateEntryAsync(created, ct);
+                    var hash = VaultItemService.ContentHash(reloaded);
+                    await UpsertLinkAsync(survivorId, providerId, newId, hash, mismatch: false, ct);
+                    ProviderSessionService.Instance.CacheRemoteEntry(providerId, created);
+                    linkedProviders.Add(providerId);
+                    result.OriginsCreated++;
+                    result.Messages.Add($"Created {provider.DisplayName} entry ({newId}) under '{canonicalPath ?? "(root)"}'.");
+                }
+                catch (Exception ex)
+                {
+                    LoggingConfiguration.LogException(ex, $"Create on {providerId} failed for {survivorId}.",
+                        nameof(VaultImportService));
+                    result.Messages.Add($"{providerId}: create failed ({ex.Message}).");
+                }
+            }
+        }
+        else
+        {
+            // Vault only — suppress dropped origins so Sync cannot recreate Shared rows.
+            foreach (var dropped in droppedOrigins)
+            {
+                await SuppressOriginAsync(dropped.Provider, dropped.ExternalId, survivorId, ct);
+                result.Messages.Add(
+                    $"Vault only: suppressed {dropped.Provider} origin (remote duplicate still exists until Update all).");
+            }
         }
 
         var summary =
             $"Merge ← {donorItems.Count} donor(s); links+{result.LinksTransferred}/drop{result.LinksDroppedSameProvider}" +
-            (updateLinkedSources ? "; push=yes" : "; push=no");
+            $"; del{result.OriginsDeleted}/new{result.OriginsCreated}" +
+            (updateLinkedSources ? "; push=yes" : "; push=no") +
+            (string.IsNullOrEmpty(canonicalPath) ? "" : $"; folder={canonicalPath}");
         await history.RecordApplyAsync(
             survivorId,
             fieldsBefore,
@@ -753,7 +911,7 @@ public sealed class VaultImportService
 
         ProviderSessionService.Instance.ClearRemoteCache();
         LoggingConfiguration.LogInfo(
-            $"Merged {donorItems.Count} donor(s) into {survivorId} (links transferred={result.LinksTransferred}, dropped={result.LinksDroppedSameProvider}).",
+            $"Merged {donorItems.Count} donor(s) into {survivorId} (links+{result.LinksTransferred}, drop={result.LinksDroppedSameProvider}, deleted={result.OriginsDeleted}, created={result.OriginsCreated}, path='{canonicalPath}').",
             nameof(VaultImportService));
         return result;
     }
@@ -875,6 +1033,8 @@ public sealed class VaultImportService
             "Notes" => src.Notes,
             "TOTP" => src.TotpSecret,
             "Favorite" => src.IsFavorite.ToString(),
+            "Folder" => VaultConsolidateHints.FolderDisplayName(src)
+                        ?? VaultConsolidateHints.RichestProviderPath(src),
             _ => null
         };
 
@@ -921,6 +1081,41 @@ public sealed class VaultImportService
             survivor.TotpSecret = totp;
         if (bool.TryParse(Pick("Favorite"), out var fav))
             survivor.IsFavorite = fav;
+    }
+
+    /// <summary>
+    /// Resolve Folder selection onto survivor.FolderId and return the canonical path string for providers.
+    /// </summary>
+    private async Task<string?> ApplyMergeFolderAsync(
+        VaultItem survivor,
+        IReadOnlyDictionary<Guid, VaultItem> byId,
+        MergeFieldSelection selection,
+        CancellationToken ct)
+    {
+        string? folderName = null;
+        if (selection.TryGetOverride("Folder", out var edited) && edited is not null)
+            folderName = edited.Trim();
+        else
+        {
+            var pickId = selection.Get("Folder", survivor.Id);
+            if (byId.TryGetValue(pickId, out var src))
+            {
+                folderName = VaultConsolidateHints.FolderDisplayName(src)
+                             ?? VaultConsolidateHints.RichestProviderPath(src);
+                // If picking survivor/donor that only has FolderId without navigation loaded:
+                if (string.IsNullOrWhiteSpace(folderName) && src.FolderId is int fid && fid != 0)
+                {
+                    var folders = await _items.GetFoldersAsync(ct);
+                    folderName = folders.FirstOrDefault(f => f.Id == fid)?.Name;
+                }
+            }
+        }
+
+        folderName = VaultConsolidateHints.NormalizeCanonicalPath(folderName);
+        var folder = await _items.EnsureFolderByNameAsync(folderName, ct);
+        survivor.FolderId = folder?.Id;
+        survivor.Folder = folder;
+        return folderName ?? folder?.Name;
     }
 
     private static string ShortTitle(VaultItem? item)
@@ -1066,7 +1261,13 @@ public sealed class VaultImportService
     /// After Shared edit: push to every linked provider that is connected and supports write-back,
     /// keyed by each link's origin <see cref="ExternalLink.ExternalId"/>.
     /// </summary>
-    public async Task<VaultPushResult> PushToLinkedProvidersAsync(VaultItem item, CancellationToken ct = default)
+    public Task<VaultPushResult> PushToLinkedProvidersAsync(VaultItem item, CancellationToken ct = default) =>
+        PushToLinkedProvidersAsync(item, canonicalPath: null, ct);
+
+    public async Task<VaultPushResult> PushToLinkedProvidersAsync(
+        VaultItem item,
+        string? canonicalPath,
+        CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(item);
         var result = new VaultPushResult();
@@ -1074,6 +1275,18 @@ public sealed class VaultImportService
         result.LinkCount = links.Count;
         if (links.Count == 0)
             return result;
+
+        var path = canonicalPath
+                   ?? VaultConsolidateHints.NormalizeCanonicalPath(item.Folder?.Name)
+                   ?? VaultConsolidateHints.RichestProviderPath(item);
+
+        // Resolve Folder name when navigation wasn't loaded.
+        if (path is null && item.FolderId is int fid && fid != 0)
+        {
+            var folders = await _items.GetFoldersAsync(ct);
+            path = VaultConsolidateHints.NormalizeCanonicalPath(
+                folders.FirstOrDefault(f => f.Id == fid)?.Name);
+        }
 
         var hash = VaultItemService.ContentHash(item);
         foreach (var link in links)
@@ -1117,14 +1330,14 @@ public sealed class VaultImportService
 
             try
             {
-                var pushed = ToProviderEntry(item, originId);
+                var pushed = ToProviderEntry(item, originId, path);
                 await provider.UpdateEntryAsync(pushed, ct);
                 // Keep Diff/scan cache aligned so a post-Apply reload does not re-flag this row.
                 ProviderSessionService.Instance.CacheRemoteEntry(link.Provider, pushed);
                 await UpsertLinkAsync(item.Id, link.Provider, originId, hash, mismatch: false, ct);
                 result.Updated++;
                 LoggingConfiguration.LogInfo(
-                    $"Pushed Shared→{link.Provider} for {item.Id} (origin id {originId}).",
+                    $"Pushed Shared→{link.Provider} for {item.Id} (origin id {originId}, path='{path}').",
                     nameof(VaultImportService));
             }
             catch (Exception ex)
@@ -1139,7 +1352,7 @@ public sealed class VaultImportService
         return result;
     }
 
-    private static ProviderEntry ToProviderEntry(VaultItem item, string externalId) =>
+    private static ProviderEntry ToProviderEntry(VaultItem item, string externalId, string? path = null) =>
         new()
         {
             ExternalId = externalId,
@@ -1149,6 +1362,7 @@ public sealed class VaultImportService
             Url = item.Url,
             Notes = item.Notes,
             Totp = item.TotpSecret,
+            Path = path,
             IsFavorite = item.IsFavorite,
             ItemType = item.ItemType
         };

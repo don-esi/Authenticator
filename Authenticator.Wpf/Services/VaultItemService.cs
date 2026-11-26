@@ -369,6 +369,25 @@ public sealed class VaultItemService
         return folder;
     }
 
+    /// <summary>
+    /// Find or create a flat Shared vault folder by name (case-insensitive).
+    /// Empty / "(none)" returns null (root / no folder).
+    /// </summary>
+    public async Task<VaultFolder?> EnsureFolderByNameAsync(string? name, CancellationToken ct = default)
+    {
+        var trimmed = (name ?? "").Trim();
+        if (string.IsNullOrEmpty(trimmed) ||
+            string.Equals(trimmed, "(none)", StringComparison.OrdinalIgnoreCase))
+            return null;
+
+        var existing = (await GetFoldersAsync(ct))
+            .FirstOrDefault(f => string.Equals(f.Name, trimmed, StringComparison.OrdinalIgnoreCase));
+        if (existing is not null)
+            return existing;
+
+        return await SaveFolderAsync(new VaultFolder { Name = trimmed }, ct);
+    }
+
     public static string ContentHash(VaultItem item)
     {
         var payload = $"{item.Title}|{item.Username}|{item.Password}|{item.Url}|{item.EquivalentDomains}|{item.Notes}|{item.PayloadJson}|{item.IsFavorite}|{item.ItemType}";

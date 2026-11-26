@@ -6,6 +6,10 @@ public sealed class ProviderCapabilities
 {
     public bool SupportsFavorites { get; init; }
     public bool SupportsWriteBack { get; init; }
+    /// <summary>Provider can delete an origin entry by ExternalId (LastPass/KeePass).</summary>
+    public bool SupportsDelete { get; init; }
+    /// <summary>Provider can create a new origin entry and return its ExternalId.</summary>
+    public bool SupportsCreate { get; init; }
     public bool SupportsSecureNotes { get; init; }
     public bool RequiresFilePath { get; init; }
     public bool RequiresUsername { get; init; }
@@ -58,9 +62,19 @@ public interface IVaultProvider
 
     /// <summary>
     /// Updates an existing provider entry identified by <see cref="ProviderEntry.ExternalId"/>
-    /// (origin store id). No-op capability when <see cref="ProviderCapabilities.SupportsWriteBack"/> is false.
+    /// (origin store id). When <see cref="ProviderEntry.Path"/> is set, moves the entry into that folder/group.
     /// </summary>
     Task UpdateEntryAsync(ProviderEntry entry, CancellationToken ct = default);
+
+    /// <summary>
+    /// Deletes an origin entry. Required when <see cref="ProviderCapabilities.SupportsDelete"/> is true.
+    /// </summary>
+    Task DeleteEntryAsync(string externalId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Creates a new origin entry (honors <see cref="ProviderEntry.Path"/>). Returns the new ExternalId.
+    /// </summary>
+    Task<string> CreateEntryAsync(ProviderEntry entry, CancellationToken ct = default);
 }
 
 public static class VaultProviderCatalog

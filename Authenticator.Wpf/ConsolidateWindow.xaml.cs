@@ -829,7 +829,7 @@ public partial class ConsolidateWindow : Window
         var donors = donorIds.Select(id => _items.FirstOrDefault(i => i.Id == id)).Where(i => i is not null).Cast<VaultItem>().ToList();
         if (survivor is null || donors.Count == 0) return;
         if (!AppDialog.Confirm(this,
-                $"Merge {donors.Count} item(s) into \"{survivor.Title}\"?\n\nDonors are soft-deleted; provider links move to the survivor when possible.",
+                $"Merge {donors.Count} item(s) into \"{survivor.Title}\"?\n\nDonors are soft-deleted in Shared. Update all will align linked vaults (same fields/folder), delete same-provider duplicates remotely, and create missing provider entries.",
                 "Consolidate", confirmText: "Continue"))
             return;
 
@@ -845,7 +845,7 @@ public partial class ConsolidateWindow : Window
         MergeFieldSelection selection)
     {
         var choice = AppDialog.Choose(this,
-            "Apply merge to the vault?\n\nUpdate all also pushes the survivor values to linked providers.",
+            "Apply merge so vaults match?\n\nUpdate all: push survivor fields/folder to linked providers, delete same-provider remote duplicates, create missing provider entries.\n\nVault only: Shared merge only (remote duplicates remain; dropped origins are suppressed from Sync).",
             "Merge into vault", primaryText: "Update all", secondaryText: "Vault only", cancelText: "Cancel");
         if (choice == AppDialogChoice.Cancel) return;
 
@@ -855,12 +855,17 @@ public partial class ConsolidateWindow : Window
             var result = await _import.MergeVaultItemsAsync(survivorId, donorIds, selection,
                 updateLinkedSources: choice == AppDialogChoice.Primary);
             _changedAny = true;
-            var msg = $"Merged into survivor. Links transferred: {result.LinksTransferred}. Same-provider dropped: {result.LinksDroppedSameProvider}.";
-            if (result.Messages.Count > 0) msg += "\n" + string.Join("\n", result.Messages.Take(5));
-            if (result.Push is { } push && (push.Failed > 0 || push.Messages.Count > 0))
+            var msg =
+                $"Merged into survivor. Links transferred: {result.LinksTransferred}. Same-provider dropped: {result.LinksDroppedSameProvider}." +
+                $"\nRemote deleted: {result.OriginsDeleted}. Created: {result.OriginsCreated}." +
+                (string.IsNullOrEmpty(result.CanonicalPath) ? "" : $"\nFolder: {result.CanonicalPath}");
+            if (result.Messages.Count > 0) msg += "\n" + string.Join("\n", result.Messages.Take(8));
+            if (result.Push is { } push && (push.Failed > 0 || push.Updated > 0 || push.Messages.Count > 0))
                 msg += $"\nProviders: {push.Updated} updated, {push.Skipped} skipped, {push.Failed} failed.";
+            var warn = result.Push is { Failed: > 0 } ||
+                       result.Messages.Any(m => m.Contains("failed", StringComparison.OrdinalIgnoreCase));
             AppDialog.Alert(this, msg, "Consolidate",
-                result.Push is { Failed: > 0 } ? AppDialogKind.Warning : AppDialogKind.Info);
+                warn ? AppDialogKind.Warning : AppDialogKind.Info);
             await ReloadAsync();
         }
         catch (Exception ex)
