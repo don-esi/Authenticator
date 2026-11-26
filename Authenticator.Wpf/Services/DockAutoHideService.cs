@@ -102,7 +102,7 @@ public sealed class DockAutoHideService : IDisposable
         if (mainHwnd == IntPtr.Zero)
             return;
 
-        if (IsOurForeground(mainHwnd))
+        if (IsFocusWithWindow(_window))
             return;
 
         if (!_canCollapse())
@@ -115,8 +115,16 @@ public sealed class DockAutoHideService : IDisposable
         _ = CollapseGuardedAsync();
     }
 
-    private bool IsOurForeground(IntPtr mainHwnd)
+    /// <summary>
+    /// True when the foreground HWND is this window, a child, or a Win32-owned popup
+    /// (WPF ContextMenu / Popup / owned dialog).
+    /// </summary>
+    public static bool IsFocusWithWindow(Window window)
     {
+        var mainHwnd = new WindowInteropHelper(window).Handle;
+        if (mainHwnd == IntPtr.Zero)
+            return true; // not ready — don't hide
+
         var foreground = GetForegroundWindow();
         if (foreground == IntPtr.Zero)
             return true; // ambiguous — don't hide
@@ -128,7 +136,7 @@ public sealed class DockAutoHideService : IDisposable
         if (IsChild(mainHwnd, foreground))
             return true;
 
-        // MessageBox / common dialogs owned by us.
+        // MessageBox / ContextMenu popup / common dialogs owned by us.
         if (GetWindow(foreground, GwOwner) == mainHwnd)
             return true;
 

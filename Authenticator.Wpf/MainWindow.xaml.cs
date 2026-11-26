@@ -1,4 +1,5 @@
 using System.Windows;
+using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Media;
@@ -45,10 +46,12 @@ public partial class MainWindow : Window
     private readonly SqlDiscoveryService _discovery = new();
     private bool _vaultTabActive;
     private UIElement? _pageBeforeSettings;
+    private static bool _contextMenuDockHandlersRegistered;
 
     public MainWindow()
     {
         InitializeComponent();
+        EnsureContextMenuDockHandlers();
         // Position from local dock cache before first paint — SQL dock state loads later in Loaded.
         ApplyCachedDockPlacement();
         // Keep pages hidden until Loaded decides lock vs. show — otherwise CodesView
@@ -152,6 +155,46 @@ public partial class MainWindow : Window
     {
         if (_suppressDockAutoHide > 0)
             _suppressDockAutoHide--;
+    }
+
+    /// <summary>
+    /// ContextMenu popups deactivate the main window and sit outside its mouse bounds;
+    /// without suppress, flyout (unpinned) dock mode collapses while the menu is open.
+    /// </summary>
+    private static void EnsureContextMenuDockHandlers()
+    {
+        if (_contextMenuDockHandlersRegistered)
+            return;
+        _contextMenuDockHandlersRegistered = true;
+        EventManager.RegisterClassHandler(
+            typeof(ContextMenu),
+            ContextMenu.OpenedEvent,
+            new RoutedEventHandler(OnAnyContextMenuOpened));
+    }
+
+    private static void OnAnyContextMenuOpened(object sender, RoutedEventArgs e)
+    {
+        if (sender is not ContextMenu menu)
+            return;
+        if (GetOwningMainWindow(menu) is not { } main)
+            return;
+
+        main.BeginDockAutoHideSuppress();
+        void OnClosed(object s, RoutedEventArgs args)
+        {
+            menu.Closed -= OnClosed;
+            main.EndDockAutoHideSuppress();
+        }
+
+        menu.Closed += OnClosed;
+    }
+
+    private static MainWindow? GetOwningMainWindow(ContextMenu menu)
+    {
+        var target = menu.PlacementTarget as DependencyObject ?? menu.Parent as DependencyObject;
+        if (target is null)
+            return null;
+        return Window.GetWindow(target) as MainWindow;
     }
 
     private bool IsDocked =>
@@ -388,6 +431,15 @@ public partial class MainWindow : Window
         {
             LoggingConfiguration.LogInfo(
                 $"Dock auto-hide skipped ({reason}): docked={IsDocked} collapsed={_isCollapsed} animating={_dockAnimating} forceClose={_forceClose} pinned={_dockPinned} suppress={_suppressDockAutoHide} visible={IsVisible} pos={_dockPosition}",
+                nameof(MainWindow));
+            return;
+        }
+
+        // ContextMenu / owned Popup took activation — stay expanded while focus is still ours.
+        if (DockAutoHideService.IsFocusWithWindow(this))
+        {
+            LoggingConfiguration.LogInfo(
+                $"Dock auto-hide skipped ({reason}): focus still with this window or an owned popup.",
                 nameof(MainWindow));
             return;
         }
