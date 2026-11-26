@@ -273,6 +273,53 @@ public static class VaultConsolidateHints
         return p.Replace('\\', '/');
     }
 
+    /// <summary>
+    /// True when any path segment looks like a provider recycle/trash/deleted-items folder
+    /// (KeePass Recycle Bin, LastPass Deleted Items, etc.). Sync/import should skip those entries.
+    /// </summary>
+    public static bool IsDeletedItemsFolderPath(string? path)
+    {
+        var normalized = NormalizeCanonicalPath(path);
+        if (normalized is null)
+            return false;
+
+        foreach (var segment in normalized.Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            if (LooksLikeDeletedItemsFolder(segment))
+                return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>Match folder names like Recycle Bin, Trash, Deleted Items (ignores spaces/_/-).</summary>
+    public static bool LooksLikeDeletedItemsFolder(string? folderName)
+    {
+        if (string.IsNullOrWhiteSpace(folderName))
+            return false;
+
+        var compact = new string(folderName
+            .Where(c => !char.IsWhiteSpace(c) && c is not '_' and not '-' and not '.')
+            .ToArray());
+        if (compact.Length == 0)
+            return false;
+
+        return compact.Equals("recyclebin", StringComparison.OrdinalIgnoreCase)
+               || compact.Equals("trash", StringComparison.OrdinalIgnoreCase)
+               || compact.Equals("trashbin", StringComparison.OrdinalIgnoreCase)
+               || compact.Equals("trashcan", StringComparison.OrdinalIgnoreCase)
+               || compact.Equals("deleted", StringComparison.OrdinalIgnoreCase)
+               || compact.Equals("deleteditem", StringComparison.OrdinalIgnoreCase)
+               || compact.Equals("deleteditems", StringComparison.OrdinalIgnoreCase)
+               || compact.Equals("recentlydeleted", StringComparison.OrdinalIgnoreCase)
+               || compact.Equals("rubbish", StringComparison.OrdinalIgnoreCase)
+               || compact.Equals("rubbishbin", StringComparison.OrdinalIgnoreCase)
+               || compact.Equals("wastebasket", StringComparison.OrdinalIgnoreCase)
+               || compact.Equals("wastebin", StringComparison.OrdinalIgnoreCase)
+               || compact.Equals("papierkorb", StringComparison.OrdinalIgnoreCase)
+               || compact.Equals("corbeille", StringComparison.OrdinalIgnoreCase);
+    }
+
     private static string? FieldRaw(string field, VaultItem item) => field switch
     {
         "Title" => item.Title,
@@ -300,7 +347,7 @@ public sealed class VaultImportService
         if (!provider.IsConnected)
             throw new InvalidOperationException($"{provider.DisplayName} is not connected.");
 
-        var entries = await provider.ListEntriesAsync(ct);
+        var entries = ExcludeDeletedItemsFolders(await provider.ListEntriesAsync(ct), provider.ProviderId);
         var indexes = await BuildIdentityIndexesAsync(ct);
         var imported = 0;
         var linkedExisting = 0;
@@ -388,7 +435,7 @@ public sealed class VaultImportService
         if (!provider.IsConnected)
             throw new InvalidOperationException($"{provider.DisplayName} is not connected.");
 
-        var entries = await provider.ListEntriesAsync(ct);
+        var entries = ExcludeDeletedItemsFolders(await provider.ListEntriesAsync(ct), provider.ProviderId);
         ProviderSessionService.Instance.CacheRemoteEntries(provider.ProviderId, entries);
 
         var indexes = await BuildIdentityIndexesAsync(ct);
@@ -460,7 +507,7 @@ public sealed class VaultImportService
         if (!provider.IsConnected)
             throw new InvalidOperationException($"{provider.DisplayName} is not connected.");
 
-        var entries = (await provider.ListEntriesAsync(ct)).ToList();
+        var entries = ExcludeDeletedItemsFolders(await provider.ListEntriesAsync(ct), provider.ProviderId);
         ProviderSessionService.Instance.CacheRemoteEntries(provider.ProviderId, entries);
 
         var result = new VaultSyncResult();
@@ -505,6 +552,36 @@ public sealed class VaultImportService
             $"Conflict scan {provider.ProviderId}: unchanged={result.Unchanged}, conflicts={result.Conflicts}.",
             nameof(VaultImportService));
         return result;
+    }
+
+    /// <summary>
+    /// Drop provider entries whose Path sits under recycle/trash/deleted-items folders.
+    /// </summary>
+    private static IReadOnlyList<ProviderEntry> ExcludeDeletedItemsFolders(
+        IReadOnlyList<ProviderEntry> entries,
+        string providerId)
+    {
+        var kept = new List<ProviderEntry>(entries.Count);
+        var skipped = 0;
+        foreach (var entry in entries)
+        {
+            if (VaultConsolidateHints.IsDeletedItemsFolderPath(entry.Path))
+            {
+                skipped++;
+                continue;
+            }
+
+            kept.Add(entry);
+        }
+
+        if (skipped > 0)
+        {
+            LoggingConfiguration.LogInfo(
+                $"Skipped {skipped} {providerId} entr{(skipped == 1 ? "y" : "ies")} under recycle/trash/deleted folders.",
+                nameof(VaultImportService));
+        }
+
+        return kept;
     }
 
     private static void ApplyEntry(VaultItem item, ProviderEntry entry, bool syncFavorites)

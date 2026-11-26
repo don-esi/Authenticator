@@ -371,6 +371,10 @@ internal sealed class KeePassVaultProvider : MemoryVaultProvider
     {
         foreach (var pe in db.RootGroup.GetEntries(true))
         {
+            // Recycle Bin is still enumerable via GetEntries(true); skip by UUID and by folder name.
+            if (IsInRecycleBin(pe, db) || VaultConsolidateHints.IsDeletedItemsFolderPath(BuildPath(pe)))
+                continue;
+
             var fav = pe.Strings.ReadSafe("Favorite");
             var favorite = fav is "1" or "true" or "True";
             yield return MapLogin(
@@ -385,6 +389,26 @@ internal sealed class KeePassVaultProvider : MemoryVaultProvider
                 createdAt: ToUtc(pe.CreationTime),
                 modifiedAt: ToUtc(pe.LastModificationTime));
         }
+    }
+
+    private static bool IsInRecycleBin(PwEntry entry, PwDatabase db)
+    {
+        if (!db.RecycleBinEnabled)
+            return false;
+
+        var recycleUuid = db.RecycleBinUuid;
+        if (recycleUuid is null || recycleUuid.Equals(PwUuid.Zero))
+            return false;
+
+        var group = entry.ParentGroup;
+        while (group is not null)
+        {
+            if (group.Uuid.Equals(recycleUuid))
+                return true;
+            group = group.ParentGroup;
+        }
+
+        return false;
     }
 
     private static DateTime? ToUtc(DateTime value)
