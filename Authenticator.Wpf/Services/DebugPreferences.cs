@@ -8,6 +8,12 @@ public sealed class DebugPreferencesState
 {
     /// <summary>When true, Settings shows developer purge/reset actions.</summary>
     public bool DeveloperMode { get; set; }
+
+    /// <summary>
+    /// When true, skip PIN/Yubi/Hello at startup and auto-lock — unwrap DEK from the
+    /// DPAPI-protected lock file (dev/debug only; still bound to this Windows user).
+    /// </summary>
+    public bool SkipUnlock { get; set; }
 }
 
 /// <summary>LocalAppData debug toggles (not synced to Shared SQL).</summary>

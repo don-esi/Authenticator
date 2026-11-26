@@ -209,9 +209,10 @@ public partial class MainWindow : Window
         ConfigureLockOverlay();
         _lastActivityUtc = DateTime.UtcNow;
 
-        if (_hasUnlockMethod)
+        var skipUnlock = new DebugPreferences().Load().SkipUnlock;
+        if (_hasUnlockMethod && !skipUnlock)
             Lock();
-        // else: keep PageHost collapsed until first-run wizard completes
+        // else: keep PageHost collapsed until first-run wizard / debug auto-unlock completes
 
         var databaseReady = false;
         try
@@ -281,6 +282,21 @@ public partial class MainWindow : Window
 
         if (databaseReady && !_hasUnlockMethod)
             await RunFirstRunWizardAsync();
+        else if (databaseReady && _hasUnlockMethod && skipUnlock)
+        {
+            if (_lockStore.TryUnlockForDebug())
+            {
+                LoggingConfiguration.LogInfo("Skip unlock (debug): auto-unlocked without PIN/Yubi/Hello.", nameof(MainWindow));
+                await CompleteUnlockAsync();
+            }
+            else
+            {
+                LoggingConfiguration.LogInfo(
+                    "Skip unlock (debug) is on but DEK could not be unwrapped — showing lock screen.",
+                    nameof(MainWindow));
+                Lock();
+            }
+        }
 
         RevealMainWindow();
         _lockTimer.Start();
@@ -834,6 +850,13 @@ public partial class MainWindow : Window
     {
         if (!_hasUnlockMethod)
             return;
+
+        // Developer skip-unlock: suppress auto-lock and manual lock while debugging.
+        if (new DebugPreferences().Load().SkipUnlock)
+        {
+            LoggingConfiguration.LogDebug("Lock skipped — SkipUnlock debug preference is on.", nameof(MainWindow));
+            return;
+        }
 
         _locked = true;
         _codesMasked = false;

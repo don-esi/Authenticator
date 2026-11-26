@@ -621,6 +621,9 @@ public sealed class VaultImportService
             vault.Notes = entry.Notes;
         if (string.IsNullOrWhiteSpace(vault.TotpSecret) && !string.IsNullOrWhiteSpace(entry.Totp))
             vault.TotpSecret = entry.Totp;
+        // Adopt provider type when Shared still has the default Login from a prior blind import.
+        if (vault.ItemType == VaultItemType.Login && entry.ItemType != VaultItemType.Login)
+            vault.ItemType = entry.ItemType;
         if (syncFavorites && !vault.IsFavorite && entry.IsFavorite)
             vault.IsFavorite = true;
 

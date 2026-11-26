@@ -316,6 +316,30 @@ public sealed class LockCredentialStore
         }
     }
 
+    /// <summary>
+    /// Debug/dev auto-unlock: unwrap DEK from Hello or Yubi wraps already in the DPAPI lock file
+    /// without PIN entry, OTP, or Hello consent. Returns false when only PIN is configured
+    /// (PIN KEK is not stored) or no wraps exist yet.
+    /// </summary>
+    public bool TryUnlockForDebug(VaultKeyService? keys = null)
+    {
+        keys ??= VaultKeyService.Instance;
+        if (keys.IsUnlocked)
+            return true;
+
+        if (TryUnlockWithHello(keys))
+            return true;
+
+        // YubiSlotKek lives in the DPAPI file — same as a successful OTP path after validation.
+        var credentials = Load();
+        if (credentials.YubiKeyEnabled &&
+            !string.IsNullOrWhiteSpace(credentials.YubiSlotKek) &&
+            !string.IsNullOrWhiteSpace(credentials.YubiDekWrap))
+            return TryUnlockWithYubi(keys);
+
+        return false;
+    }
+
     public void ClearHello()
     {
         var credentials = Load();

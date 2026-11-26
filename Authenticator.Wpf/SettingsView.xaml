@@ -350,6 +350,24 @@
 								AutomationProperties.Name="Developer mode" />
 						</Grid>
 						<StackPanel x:Name="DeveloperActionsPanel" Visibility="Collapsed">
+							<Grid Margin="0,0,0,12">
+								<Grid.ColumnDefinitions>
+									<ColumnDefinition Width="*" />
+									<ColumnDefinition Width="Auto" />
+								</Grid.ColumnDefinitions>
+								<StackPanel>
+									<TextBlock VerticalAlignment="Center" Foreground="{DynamicResource PrimaryTextBrush}" Text="Skip unlock (debug)" />
+									<TextBlock Margin="0,2,12,0" Foreground="{DynamicResource SecondaryTextBrush}" TextWrapping="Wrap"
+										Text="Skip PIN / YubiKey / Hello at startup and auto-lock. Uses the DPAPI wrap already on this Windows user (no Yubi tap)." />
+								</StackPanel>
+								<ToggleButton x:Name="SkipUnlockToggle"
+									Grid.Column="1"
+									VerticalAlignment="Top"
+									Style="{StaticResource SwitchToggle}"
+									Checked="SkipUnlock_Changed"
+									Unchecked="SkipUnlock_Changed"
+									AutomationProperties.Name="Skip unlock for debugging" />
+							</Grid>
 							<syncfusion:ButtonAdv
 								x:Name="PurgeVaultButton"
 								Margin="0,0,0,8"

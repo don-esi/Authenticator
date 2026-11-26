@@ -238,6 +238,7 @@ public partial class SettingsView : UserControl
     {
         var debug = _debugPrefs.Load();
         DeveloperModeToggle.IsChecked = debug.DeveloperMode;
+        SkipUnlockToggle.IsChecked = debug.SkipUnlock;
         DeveloperActionsPanel.Visibility = debug.DeveloperMode ? Visibility.Visible : Visibility.Collapsed;
         DeveloperStatus.Text = string.Empty;
     }
@@ -248,11 +249,46 @@ public partial class SettingsView : UserControl
             return;
 
         var enabled = DeveloperModeToggle.IsChecked == true;
-        _debugPrefs.Save(new DebugPreferencesState { DeveloperMode = enabled });
+        var state = _debugPrefs.Load();
+        state.DeveloperMode = enabled;
+        _debugPrefs.Save(state);
         DeveloperActionsPanel.Visibility = enabled ? Visibility.Visible : Visibility.Collapsed;
         DeveloperStatus.Text = enabled
-            ? "Developer mode on — purge is available."
+            ? "Developer mode on — debug tools are available."
             : string.Empty;
+    }
+
+    private void SkipUnlock_Changed(object sender, RoutedEventArgs e)
+    {
+        if (_loading)
+            return;
+
+        var enabled = SkipUnlockToggle.IsChecked == true;
+        var state = _debugPrefs.Load();
+        state.SkipUnlock = enabled;
+        _debugPrefs.Save(state);
+
+        if (!enabled)
+        {
+            DeveloperStatus.Text = "Skip unlock off — PIN/Yubi/Hello required again after lock.";
+            return;
+        }
+
+        // Prove we can unwrap without a gesture (Yubi/Hello wraps in the DPAPI lock file).
+        if (_lockStore.TryUnlockForDebug())
+        {
+            DeveloperStatus.Text =
+                "Skip unlock on — next launch skips the lock screen. Auto-lock is suppressed while this is on.";
+            LoggingConfiguration.LogInfo("Skip unlock (debug) enabled.", nameof(SettingsView));
+        }
+        else
+        {
+            SkipUnlockToggle.IsChecked = false;
+            state.SkipUnlock = false;
+            _debugPrefs.Save(state);
+            DeveloperStatus.Text =
+                "Could not auto-unlock. Unlock once with YubiKey or Windows Hello first (PIN-only vaults need Hello or Yubi enrolled).";
+        }
     }
 
     private async void PurgeVault_Click(object sender, RoutedEventArgs e)

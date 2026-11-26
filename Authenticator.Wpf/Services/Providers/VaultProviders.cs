@@ -1,4 +1,6 @@
 using System.IO;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using Authenticator.Data.Models;
 using Authenticator.Logging;
 using KeePassLib;
@@ -131,7 +133,8 @@ internal abstract class MemoryVaultProvider : IVaultProvider
         string? path = null,
         bool favorite = false,
         DateTime? createdAt = null,
-        DateTime? modifiedAt = null) =>
+        DateTime? modifiedAt = null,
+        VaultItemType itemType = VaultItemType.Login) =>
         new()
         {
             ExternalId = id,
@@ -143,10 +146,11 @@ internal abstract class MemoryVaultProvider : IVaultProvider
             Totp = totp,
             Path = path,
             IsFavorite = favorite,
-            ItemType = VaultItemType.Login,
+            ItemType = itemType,
             CreatedAt = createdAt,
             ModifiedAt = modifiedAt
         };
+
 }
 
 internal sealed class KeePassVaultProvider : MemoryVaultProvider
@@ -465,7 +469,15 @@ internal sealed class OpVaultProvider : MemoryVaultProvider
         ArgumentException.ThrowIfNullOrWhiteSpace(request.FilePath);
         ArgumentException.ThrowIfNullOrWhiteSpace(request.Password);
         var accounts = PasswordManager.OpVault.Vault.Open(request.FilePath, request.Password);
-        SetEntries(accounts.Select(a => MapLogin(a.Id, a.Name, a.Username, a.Password, a.Url, a.Note, path: a.Folder?.Name)));
+        SetEntries(accounts.Select(a => MapLogin(
+            a.Id,
+            a.Name,
+            a.Username,
+            a.Password,
+            a.Url,
+            a.Note,
+            path: a.Folder?.Name,
+            itemType: ProviderItemTypes.FromOnePasswordCategory(a.Category))));
         return Task.CompletedTask;
     }
 }
@@ -531,7 +543,8 @@ internal sealed class LastPassVaultProvider : MemoryVaultProvider
                         a.IsFavorite,
                         createdAt: a.CreatedAt,
                         // Prefer last password change when present — more useful for Diff accuracy.
-                        modifiedAt: a.LastPasswordChangeAt ?? a.ModifiedAt)));
+                        modifiedAt: a.LastPasswordChangeAt ?? a.ModifiedAt,
+                        itemType: ProviderItemTypes.FromLastPass(a.IsSecureNote, a.NoteType, a.Url))));
             }
 
             LoggingConfiguration.LogInfo(
@@ -674,7 +687,14 @@ internal abstract class CloudStubProvider : MemoryVaultProvider
         if (!string.IsNullOrWhiteSpace(request.FilePath) && File.Exists(request.FilePath))
         {
             var json = File.ReadAllText(request.FilePath);
-            var entries = System.Text.Json.JsonSerializer.Deserialize<List<ProviderEntry>>(json) ?? new();
+            var options = new JsonSerializerOptions
+            {
+                PropertyNameCaseInsensitive = true,
+                Converters = { new JsonStringEnumConverter(JsonNamingPolicy.CamelCase) }
+            };
+            var entries = JsonSerializer.Deserialize<List<ProviderEntry>>(json, options) ?? new();
+            foreach (var entry in entries)
+                ProviderItemTypes.EnrichFromFields(entry);
             SetEntries(entries);
             LoggingConfiguration.LogInfo($"{ProviderId}: loaded {entries.Count} entries from JSON export.", nameof(CloudStubProvider));
             return Task.CompletedTask;
